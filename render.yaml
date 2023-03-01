@@ -1,0 +1,22 @@
+# Render Blueprint: https://render.com/deploy?repo=https://github.com/kestrel-labs/kestrel
+services:
+  - type: web
+    name: kestrel
+    runtime: docker
+    dockerfilePath: ./deploy/Dockerfile
+    dockerContext: .
+    branch: main
+    plan: standard
+    healthCheckPath: /admin/login
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase: { name: kestrel-db, property: connectionString }
+      - key: KESTREL_SECRET
+        generateValue: true
+      - key: TENANCY_MODE
+        value: single
+      - key: DEFAULT_SHOP_NAME
+        value: My Shop
+databases:
+  - name: kestrel-db
+    plan: basic-256mb

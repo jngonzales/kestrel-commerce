@@ -1,0 +1,23 @@
+# DigitalOcean App Platform: https://cloud.digitalocean.com/apps/new?repo=https://github.com/kestrel-labs/kestrel/tree/main
+spec:
+  name: kestrel
+  services:
+    - name: web
+      git:
+        repo_clone_url: https://github.com/kestrel-labs/kestrel.git
+        branch: main
+      dockerfile_path: deploy/Dockerfile
+      http_port: 3000
+      instance_size_slug: apps-s-1vcpu-2gb
+      envs:
+        - { key: DATABASE_URL, scope: RUN_TIME, value: '${db.DATABASE_URL}' }
+        - { key: KESTREL_SECRET, scope: RUN_TIME, type: SECRET }
+        - { key: APP_URL, scope: RUN_TIME, value: '${APP_URL}' }
+        - { key: TENANCY_MODE, scope: RUN_TIME, value: single }
+  databases:
+    # Dev database: fine to try Kestrel, not for a live shop (no backups). `production: true` needs an existing
+    # managed cluster (`cluster_name`), so it can't be created from a one-click template. Before going live, create a
+    # managed Postgres cluster in DigitalOcean and point DATABASE_URL at it.
+    - name: db
+      engine: PG
+      production: false

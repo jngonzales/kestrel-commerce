@@ -1,0 +1,20 @@
+node_modules
+.next
+.env
+*.tsbuildinfo
+next-env.d.ts
+
+# Uploaded files (local storage)
+.data
+
+# Bundled apps (scripts/bundle-app.mjs)
+apps/*/dist
+
+.DS_Store
+report-site/
+.vscode/
+
+# A generate run that died while writing leaves its temp file
+admin-api.gen.ts.tmp
+
+brag-output/
