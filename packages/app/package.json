@@ -1,0 +1,36 @@
+{
+  "name": "@kestrel/app",
+  "version": "0.16.0",
+  "description": "Build Kestrel apps with no database and no OAuth code: authenticate, Admin API, per-shop data, signed requests, and admin-styled UI components",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ui": "./src/ui.tsx",
+    "./store": "./src/store.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "generate": "tsx --env-file-if-exists=../../.env scripts/generate-admin-api.ts",
+    "test": "tsx --test \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.16",
+    "@kestrel/app-bridge": "workspace:*",
+    "@kestrel/log": "workspace:*",
+    "@kestrel/marketplace-sdk": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "hono": "catalog:",
+    "openapi-fetch": "^0.17.0",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@orpc/openapi": "^1.16.2",
+    "@orpc/zod": "^1.16.2",
+    "@kestrel/api": "workspace:^",
+    "@types/node": "catalog:",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
+    "openapi-typescript": "^7.13.0",
+    "tsx": "^4.23.15"
+  }
+}
