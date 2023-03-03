@@ -1,0 +1,53 @@
+# @kestrel/app-bridge
+
+Lightweight browser client for embedded apps running inside the Kestrel admin. It communicates with the host admin window via `postMessage` to retrieve short-lived session tokens, make authenticated backend requests without third-party cookies, display toast notifications, ask for confirmation in an admin dialog, and trigger top-level window redirects.
+
+## Installation
+
+```bash
+pnpm add @kestrel/app-bridge
+```
+
+## Usage
+
+Initialize the bridge inside an embedded iframe. The bridge automatically resolves the Kestrel instance from the `instance` query parameter added to your app URL by the admin:
+
+```ts
+import { createAppBridge } from '@kestrel/app-bridge'
+
+const bridge = createAppBridge()
+
+// Call your app backend with an automatic Authorization: Bearer <session-token> header
+const res = await bridge.authenticatedFetch('/api/settings', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ notifications: true }),
+})
+
+// Display a toast in the Kestrel admin
+await bridge.toast('Settings saved')
+
+// Or display an error toast
+await bridge.toast('Failed to update settings', { isError: true })
+
+// Retrieve a fresh session token (JWT, valid for 60s) directly
+const token = await bridge.getSessionToken()
+
+// Match the admin's theme ('light' | 'dark'), now and when it changes, instead of the OS setting
+document.documentElement.dataset.theme = await bridge.getTheme()
+const stop = bridge.onThemeChange((theme) => (document.documentElement.dataset.theme = theme))
+
+// Ask in a dialog drawn by the admin; true when the person confirms, false on Cancel or Esc (it waits, no timeout)
+const ok = await bridge.confirm({ title: 'Delete this review?', message: "This can't be undone.", label: 'Delete' })
+
+// Redirect the parent admin window (e.g. to restart OAuth when framed)
+await bridge.redirect('https://example.com/oauth/authorize')
+```
+
+## Entry points
+
+- `@kestrel/app-bridge`: `createAppBridge`, `AppBridge`, `AdminMessage`, `AppMessage`, `AppRequest` and `Theme`.
+
+## Documentation
+
+See [Kestrel Apps](https://github.com/kestrel-labs/kestrel/blob/main/docs/apps.md) for architecture details, and the [App SDK Guide](https://github.com/kestrel-labs/kestrel/blob/main/apps/docs/content/docs/apps/sdk.mdx) for frontend components and backend token verification.
