@@ -1,0 +1,49 @@
+# @kestrel/storefront-sdk
+
+The Kestrel Storefront SDK provides a typed client and API contract for building custom storefronts with frameworks such as Next.js and Astro. It supports accessing shop data, products, collections, carts, checkout, and theme information through the Kestrel Storefront API.
+
+## Installation
+
+```bash
+pnpm add @kestrel/storefront-sdk
+```
+
+## Usage
+
+Create a client and fetch shop information:
+
+```ts
+import { createStorefrontClient } from '@kestrel/storefront-sdk'
+
+const client = createStorefrontClient({
+  baseUrl: 'http://localhost:3000',
+})
+
+const shop = await client.shop.get()
+console.log(shop)
+```
+
+For shops that require a publishable key, provide it when creating the client:
+
+```ts
+const client = createStorefrontClient({
+  baseUrl: 'https://shop.example.com',
+  publishableKey: 'pk_your_key',
+})
+```
+
+The client works in browsers, Node.js, Astro, Next.js server components, and edge runtimes.
+
+## Entry Points
+
+- `@kestrel/storefront-sdk` — Main client, schemas, theme utilities, and typed error helpers.
+- `@kestrel/storefront-sdk/contract` — Storefront API contract and input/output types.
+- `@kestrel/storefront-sdk/constants` — Shared API constants.
+- `@kestrel/storefront-sdk/cart` — Cart utilities.
+- `@kestrel/storefront-sdk/money` — Money utilities.
+- `@kestrel/storefront-sdk/theme` — Theme types and utilities.
+- `@kestrel/storefront-sdk/theme-preview` — Theme preview utilities.
+
+## Documentation
+
+See the [Storefront API documentation](https://docs.kestrel.dev/docs/api/storefront) for API details and usage guidance.

@@ -1,0 +1,224 @@
+import test, { describe } from 'node:test'
+import assert from 'node:assert/strict'
+
+import { currencyDigits, formatMoney, moneyAmount, parseMoney } from '../src/money'
+
+describe('Storefront SDK Money Helpers', () => {
+  describe('formatMoney', () => {
+    test('formats standard 2-decimal currencies (USD, EUR, GBP)', () => {
+      assert.equal(formatMoney({ amountMinor: 1999, currencyCode: 'USD' }), '$19.99')
+      assert.equal(formatMoney({ amountMinor: 5000, currencyCode: 'EUR' }), '€50.00')
+      assert.equal(formatMoney({ amountMinor: 1550, currencyCode: 'GBP' }), '£15.50')
+    })
+
+    test('formats zero amount for 2-decimal currencies', () => {
+      assert.equal(formatMoney({ amountMinor: 0, currencyCode: 'USD' }), '$0.00')
+      assert.equal(formatMoney({ amountMinor: 0, currencyCode: 'EUR' }), '€0.00')
+    })
+
+    test('formats small amounts less than 1 major unit', () => {
+      assert.equal(formatMoney({ amountMinor: 99, currencyCode: 'USD' }), '$0.99')
+      assert.equal(formatMoney({ amountMinor: 5, currencyCode: 'USD' }), '$0.05')
+      assert.equal(formatMoney({ amountMinor: 1, currencyCode: 'USD' }), '$0.01')
+    })
+
+    test('formats large values with grouping separators', () => {
+      assert.equal(formatMoney({ amountMinor: 100000000, currencyCode: 'USD' }), '$1,000,000.00')
+      assert.equal(formatMoney({ amountMinor: 250000050, currencyCode: 'USD' }), '$2,500,000.50')
+    })
+
+    test('formats zero-decimal currencies (JPY, KRW) without decimal digits', () => {
+      assert.equal(formatMoney({ amountMinor: 1000, currencyCode: 'JPY' }), '¥1,000')
+      assert.equal(formatMoney({ amountMinor: 0, currencyCode: 'JPY' }), '¥0')
+      assert.equal(formatMoney({ amountMinor: 50000, currencyCode: 'KRW' }), '₩50,000')
+    })
+
+    test('formats 3-decimal currencies (BHD, KWD, OMR) with 3 decimal places', () => {
+      // Intl in en locale uses non-breaking space between currency symbol/code and amount
+      const bhd = formatMoney({ amountMinor: 1250, currencyCode: 'BHD' })
+      assert.match(bhd, /BHD[\s\u00A0]1\.250/)
+
+      const kwd = formatMoney({ amountMinor: 500, currencyCode: 'KWD' })
+      assert.match(kwd, /KWD[\s\u00A0]0\.500/)
+
+      const omr = formatMoney({ amountMinor: 1, currencyCode: 'OMR' })
+      assert.match(omr, /OMR[\s\u00A0]0\.001/)
+    })
+
+    test('formats negative amounts correctly', () => {
+      assert.equal(formatMoney({ amountMinor: -1999, currencyCode: 'USD' }), '-$19.99')
+      assert.equal(formatMoney({ amountMinor: -500, currencyCode: 'JPY' }), '-¥500')
+      assert.equal(formatMoney({ amountMinor: -1, currencyCode: 'USD' }), '-$0.01')
+    })
+  })
+
+  describe('moneyAmount', () => {
+    test('returns plain decimal string without symbol or grouping for 2-decimal currencies', () => {
+      assert.equal(moneyAmount({ amountMinor: 1999, currencyCode: 'USD' }), '19.99')
+      assert.equal(moneyAmount({ amountMinor: 5000, currencyCode: 'EUR' }), '50.00')
+      assert.equal(moneyAmount({ amountMinor: 1550, currencyCode: 'GBP' }), '15.50')
+    })
+
+    test('returns exact zero string matching currency precision', () => {
+      assert.equal(moneyAmount({ amountMinor: 0, currencyCode: 'USD' }), '0.00')
+      assert.equal(moneyAmount({ amountMinor: 0, currencyCode: 'JPY' }), '0')
+      assert.equal(moneyAmount({ amountMinor: 0, currencyCode: 'BHD' }), '0.000')
+    })
+
+    test('preserves leading fractional zeros for small values', () => {
+      assert.equal(moneyAmount({ amountMinor: 99, currencyCode: 'USD' }), '0.99')
+      assert.equal(moneyAmount({ amountMinor: 5, currencyCode: 'USD' }), '0.05')
+      assert.equal(moneyAmount({ amountMinor: 1, currencyCode: 'USD' }), '0.01')
+    })
+
+    test('formats large values without thousands commas', () => {
+      assert.equal(moneyAmount({ amountMinor: 100000000, currencyCode: 'USD' }), '1000000.00')
+      assert.equal(moneyAmount({ amountMinor: 250000050, currencyCode: 'USD' }), '2500000.50')
+      assert.equal(moneyAmount({ amountMinor: 10000000, currencyCode: 'JPY' }), '10000000')
+    })
+
+    test('formats zero-decimal currencies as integer strings', () => {
+      assert.equal(moneyAmount({ amountMinor: 1000, currencyCode: 'JPY' }), '1000')
+      assert.equal(moneyAmount({ amountMinor: 250, currencyCode: 'JPY' }), '250')
+      assert.equal(moneyAmount({ amountMinor: 50000, currencyCode: 'KRW' }), '50000')
+    })
+
+    test('formats 3-decimal currencies with exactly 3 decimal digits', () => {
+      assert.equal(moneyAmount({ amountMinor: 1250, currencyCode: 'BHD' }), '1.250')
+      assert.equal(moneyAmount({ amountMinor: 500, currencyCode: 'KWD' }), '0.500')
+      assert.equal(moneyAmount({ amountMinor: 100, currencyCode: 'BHD' }), '0.100')
+      assert.equal(moneyAmount({ amountMinor: 1, currencyCode: 'OMR' }), '0.001')
+    })
+
+    test('formats negative amounts with a leading minus sign', () => {
+      assert.equal(moneyAmount({ amountMinor: -1999, currencyCode: 'USD' }), '-19.99')
+      assert.equal(moneyAmount({ amountMinor: -500, currencyCode: 'JPY' }), '-500')
+      assert.equal(moneyAmount({ amountMinor: -1, currencyCode: 'USD' }), '-0.01')
+      assert.equal(moneyAmount({ amountMinor: -1250, currencyCode: 'BHD' }), '-1.250')
+    })
+  })
+
+  describe('formatMoney and moneyAmount agree', () => {
+    test('formatMoney contains the same digits as moneyAmount for each currency precision', () => {
+      for (const currencyCode of ['USD', 'JPY', 'BHD']) {
+        for (const amountMinor of [0, 1, 99, 1999, 123456]) {
+          const money = { amountMinor, currencyCode }
+          const digitsOnly = (value: string) => value.replace(/[^\d]/g, '')
+          assert.equal(digitsOnly(formatMoney(money)), digitsOnly(moneyAmount(money)), `${currencyCode} ${amountMinor}`)
+        }
+      }
+    })
+  })
+
+  describe('currency codes', () => {
+    test('accepts lowercase currency codes', () => {
+      assert.equal(formatMoney({ amountMinor: 1999, currencyCode: 'usd' }), '$19.99')
+      assert.equal(moneyAmount({ amountMinor: 1999, currencyCode: 'usd' }), '19.99')
+    })
+
+    test('throws a RangeError for a malformed currency code', () => {
+      assert.throws(() => formatMoney({ amountMinor: 100, currencyCode: 'NOT-A-CURRENCY' }), RangeError)
+      assert.throws(() => moneyAmount({ amountMinor: 100, currencyCode: '' }), RangeError)
+    })
+  })
+
+  describe('Edge cases and caching', () => {
+    test('maintains consistent output across repeated calls with cached formatters', () => {
+      const money = { amountMinor: 2499, currencyCode: 'USD' }
+      assert.equal(formatMoney(money), '$24.99')
+      assert.equal(formatMoney(money), '$24.99')
+      assert.equal(moneyAmount(money), '24.99')
+      assert.equal(moneyAmount(money), '24.99')
+    })
+
+    test('handles single whole-unit amounts with exact trailing zeros', () => {
+      assert.equal(moneyAmount({ amountMinor: 100, currencyCode: 'USD' }), '1.00')
+      assert.equal(formatMoney({ amountMinor: 100, currencyCode: 'USD' }), '$1.00')
+      assert.equal(moneyAmount({ amountMinor: 1000, currencyCode: 'BHD' }), '1.000')
+    })
+  })
+})
+
+describe('parseMoney and currencyDigits', () => {
+  test('digits follow the currency', () => {
+    assert.deepEqual([currencyDigits('USD'), currencyDigits('JPY'), currencyDigits('BHD')], [2, 0, 3])
+  })
+  test('text becomes minor units in the currency’s own digits', () => {
+    assert.equal(parseMoney('19.99', 'USD'), 1999)
+    assert.equal(parseMoney('1000', 'JPY'), 1000)
+    assert.equal(parseMoney('1.234', 'BHD'), 1234)
+    assert.equal(parseMoney('', 'USD'), null)
+    assert.ok(Number.isNaN(parseMoney('1.5', 'JPY')))
+    assert.ok(Number.isNaN(parseMoney('1.234', 'USD')))
+  })
+})
+
+describe('formatMoney in a language', () => {
+  // Compared with the runtime's own formatting, so the test doesn't depend on one ICU version's exact characters
+  const written = (locale: string, currency: string, major: number) =>
+    new Intl.NumberFormat(locale, { style: 'currency', currency }).format(major)
+
+  test('writes a price the way the language writes it', () => {
+    assert.equal(formatMoney({ amountMinor: 123450, currencyCode: 'EUR' }, 'fr'), written('fr', 'EUR', 1234.5))
+    assert.equal(formatMoney({ amountMinor: 123450, currencyCode: 'EUR' }, 'de'), written('de', 'EUR', 1234.5))
+    assert.equal(formatMoney({ amountMinor: 123450, currencyCode: 'EUR' }, 'en-GB'), written('en-GB', 'EUR', 1234.5))
+    assert.notEqual(
+      formatMoney({ amountMinor: 123450, currencyCode: 'EUR' }, 'fr'),
+      formatMoney({ amountMinor: 123450, currencyCode: 'EUR' }, 'en'),
+      'French and English really do differ',
+    )
+  })
+
+  test('the decimal comma is a comma in French and German, a point in English', () => {
+    assert.match(formatMoney({ amountMinor: 1999, currencyCode: 'EUR' }, 'fr'), /19,99/)
+    assert.match(formatMoney({ amountMinor: 1999, currencyCode: 'EUR' }, 'de'), /19,99/)
+    assert.match(formatMoney({ amountMinor: 1999, currencyCode: 'EUR' }, 'en'), /19\.99/)
+  })
+
+  test('the currency decides the decimals, the language only how they are written', () => {
+    assert.equal(formatMoney({ amountMinor: 1000, currencyCode: 'JPY' }, 'ja'), written('ja', 'JPY', 1000))
+    assert.doesNotMatch(formatMoney({ amountMinor: 1000, currencyCode: 'JPY' }, 'fr'), /[.,]\d/)
+  })
+
+  test('with no language it is English, as before', () => {
+    assert.equal(formatMoney({ amountMinor: 123450, currencyCode: 'USD' }), '$1,234.50')
+  })
+
+  test('a language the runtime cannot read falls back to English instead of throwing', () => {
+    for (const bad of ['not a language!!', 'en_US', '']) {
+      assert.equal(formatMoney({ amountMinor: 1999, currencyCode: 'USD' }, bad || 'en'), '$19.99', bad)
+    }
+    assert.equal(formatMoney({ amountMinor: 1999, currencyCode: 'USD' }, 'x'), '$19.99')
+  })
+
+  test('in a browser the default is the page’s language, so theme scripts need no setup', () => {
+    const globals = globalThis as { document?: unknown }
+    try {
+      globals.document = { documentElement: { lang: 'de' } }
+      assert.equal(formatMoney({ amountMinor: 123450, currencyCode: 'EUR' }), written('de', 'EUR', 1234.5))
+      globals.document = { documentElement: { lang: '' } }
+      assert.equal(
+        formatMoney({ amountMinor: 123450, currencyCode: 'EUR' }),
+        written('en', 'EUR', 1234.5),
+        'no lang: English',
+      )
+      // An explicit language still wins over the page's
+      globals.document = { documentElement: { lang: 'de' } }
+      assert.equal(formatMoney({ amountMinor: 123450, currencyCode: 'EUR' }, 'fr'), written('fr', 'EUR', 1234.5))
+    } finally {
+      delete globals.document
+    }
+  })
+
+  test('one language never leaks into another through the cache', () => {
+    const money = { amountMinor: 123450, currencyCode: 'EUR' }
+    const first = formatMoney(money, 'fr')
+    assert.equal(formatMoney(money, 'en'), written('en', 'EUR', 1234.5))
+    assert.equal(formatMoney(money, 'fr'), first)
+  })
+
+  test('moneyAmount does not depend on language: it is for structured data and forms', () => {
+    assert.equal(moneyAmount({ amountMinor: 1999, currencyCode: 'EUR' }), '19.99')
+    assert.equal(moneyAmount({ amountMinor: 1000, currencyCode: 'JPY' }), '1000')
+  })
+})

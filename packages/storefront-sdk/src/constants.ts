@@ -1,0 +1,15 @@
+// Dependency-free (no zod/oRPC), so browser code doing a plain fetch can import it cheaply.
+
+export const PUBLISHABLE_KEY_HEADER = 'x-kestrel-key'
+
+/** Carries the token from `customer.signIn` on requests for a signed-in customer */
+export const CUSTOMER_TOKEN_HEADER = 'x-kestrel-customer-token'
+
+/**
+ * The language a request is for (a BCP 47 tag the shop has published, see `shop.get()` → `languages`). Products, collections
+ * and pages come back with their translated text where there is one, and in the shop's own language where there is not.
+ */
+export const LANGUAGE_HEADER = 'x-kestrel-language'
+
+/** Path of the public REST API on a Kestrel origin */
+export const API_BASE_PATH = '/api/v1'
