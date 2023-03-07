@@ -1,0 +1,19 @@
+{
+  "name": "@kestrel/cli-core",
+  "private": true,
+  "description": "What create-kestrel and kestrel share: downloading and unpacking the packaged build, the shop's .env, ports. Bundled into each CLI, never published",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "tsx --test \"tests/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@clack/prompts": "^0.7.0",
+    "@types/node": "catalog:",
+    "picocolors": "^1.1.1",
+    "tsx": "^4.23.15"
+  }
+}

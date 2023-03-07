@@ -1,0 +1,87 @@
+# kestrel
+
+Look after a Kestrel shop that you started with [`create-kestrel`](../create-kestrel), and start new apps for it.
+
+| Command                       | What it does                                                    |
+| ----------------------------- | --------------------------------------------------------------- |
+| `kestrel migrate-db`          | Moves the shop's data from the embedded database to PostgreSQL. |
+| `kestrel generate app <name>` | Makes a new Kestrel app in the folder `<name>`, ready to run.   |
+
+Options: `--to <url>` and `--to-env <NAME>` (migrate-db), `--dir <folder>` and `--port <n>` (migrate-db), `-h, --help`
+and `-v, --version`. `npx kestrel@latest --help` prints the same list.
+
+## generate app
+
+Run it in the shop folder that `create-kestrel` made:
+
+```sh
+cd my-shop
+npx kestrel@latest generate app my-app      # makes apps/my-app
+cd apps/my-app
+cp .env.example .env                        # fill in KESTREL_CLIENT_ID and KESTREL_APP_KEY from your app's page
+pnpm install && pnpm dev                    # npm or yarn work too
+```
+
+It writes a small, self-contained project (the shop can be running):
+
+- `src/server.tsx`: the whole app. A page inside the admin, an endpoint that saves a note in the shop's app data, and
+  an `order.created` webhook.
+- `package.json` (depends on `@kestrel/app` at this CLI's version), `tsconfig.json`, `.env.example`, `.gitignore` and
+  a `README.md` with the steps to run and install it.
+
+The app goes to `<shop folder>/apps/<name>` when the folder has a `.env` (use `--dir` for another shop folder), and to
+`./<name>` anywhere else. `<name>` is the folder and the package name: lowercase letters, numbers, `-`, `_` and `.`. The
+folder must not exist yet or must be empty; nothing is overwritten.
+
+The admin does not find a generated app by itself: it is its own server (port 4500). Register
+`http://localhost:4500` as the App URL and install the app from the admin.
+
+## migrate-db
+
+```sh
+cd my-shop                      # the folder create-kestrel made (it has the .env)
+# stop the shop (Ctrl+C where it runs), then:
+npx kestrel@latest migrate-db --to postgres://user:password@host:5432/kestrel
+```
+
+The new database must exist and be empty. To keep the password out of your shell history, put the address in an
+environment variable and give its name: `--to-env KESTREL_TARGET`.
+
+### What it does
+
+1. Checks that the shop is stopped (nothing answers on the admin's port, 3000; use `--port` if you started it on
+   another) and that its database is at the schema of this version.
+2. Keeps a copy of `.pglite/` next to it (`.pglite.bak-<date>`).
+3. Runs `admin/migrate-db.mjs` from the packaged build of the same version: it creates the tables in PostgreSQL,
+   copies every table in foreign-key order inside **one transaction**, and checks every table's row count before it
+   commits.
+4. Only then changes `DATABASE_URL` in the `.env`. The old line stays above it as a comment, and `.pglite/` stays
+   where it is: going back is one edit.
+
+If anything fails, PostgreSQL is left as empty as it was found, the `.env` is not touched, and the extra copy is
+removed. The old data is only ever read.
+
+### What it does not do
+
+- **The optional apps' data** (`apps/<name>/.pglite`: Stripe, CJ Dropshipping, Shippo) is not moved. They start empty
+  on PostgreSQL, and the command names the ones that had data.
+- It never merges into a database that already has tables.
+- It does not move data back, or between two PostgreSQL servers (use `pg_dump` for that).
+
+### The version rule
+
+Like `create-kestrel`, this CLI runs the packaged build of **its own version** (downloaded once into
+`~/.kestrel/app/<version>`, shared with `create-kestrel`). A shop last started by an older version must be started once
+with this one first: it updates the database at start, and `migrate-db` refuses to copy until then. A database from a
+newer version is refused too.
+
+## Development
+
+```sh
+pnpm --filter kestrel dev migrate-db --help    # runs src/main.ts
+pnpm --filter kestrel test                     # the command, against a stub in place of the build's script
+pnpm --filter @kestrel/db test                 # the copier itself (modules/db/src/move-data.ts) on two PGlite databases
+```
+
+The code that is not about this command (downloading and unpacking the build, the `.env`, ports) is
+[`@kestrel/cli-core`](../cli-core), shared with `create-kestrel`.

@@ -1,0 +1,90 @@
+import { randomBytes } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, appendFileSync, writeFileSync } from 'node:fs'
+import { isAbsolute, join, resolve } from 'node:path'
+import { parseEnv } from 'node:util'
+import { UsageError } from './errors'
+
+export const DEFAULT_DATABASE_URL = 'pglite:./.pglite'
+
+export type ShopEnv = {
+  /** DATABASE_URL, with a relative pglite: path resolved against the shop folder */
+  databaseUrl: string
+  /** KESTREL_SECRET: encrypts the provider keys saved in the admin and signs sessions; a production server will not start without it */
+  secret: string
+  /** Everything else in the file: passed to the admin as it is */
+  rest: Record<string, string>
+  file: string
+}
+
+const template = (secret: string) => `# Kestrel: the settings of this shop. Edit, then start it again.
+#
+# Where the data lives. The default is an embedded database in ./.pglite (PGlite): one process owns it, for trying
+# Kestrel out. For a real database use PostgreSQL, for example:
+# DATABASE_URL=postgres://user:password@localhost:5432/kestrel
+# (docker-compose.yml runs Kestrel and PostgreSQL in Docker)
+DATABASE_URL=${DEFAULT_DATABASE_URL}
+
+# Encrypts the provider keys saved in the admin and signs sessions. Keep it: a new one logs everyone out and makes the
+# saved keys unreadable. Do not share this file.
+KESTREL_SECRET=${secret}
+`
+
+const resolveDatabaseUrl = (url: string, shopDir: string) => {
+  if (!url.startsWith('pglite:')) return url
+  const path = url.slice('pglite:'.length)
+  return isAbsolute(path) ? url : `pglite:${resolve(shopDir, path)}`
+}
+
+/** The password of a connection string is not shown on screen */
+export const redactUrl = (url: string) => url.replace(/\/\/([^:@/]+):[^@/]*@/, '//$1:***@')
+
+/**
+ * The shop's settings: <shop folder>/.env. It is made on the first run with a fresh KESTREL_SECRET and the embedded
+ * database, and read on every run, so changing DATABASE_URL there (to PostgreSQL) is all it takes to use another
+ * database. A missing DATABASE_URL or KESTREL_SECRET is added. A dry run reads it and writes nothing.
+ */
+export function loadShopEnv(shopDir: string, { write }: { write: boolean }): ShopEnv {
+  const file = join(shopDir, '.env')
+  const exists = existsSync(file)
+  const { DATABASE_URL, KESTREL_SECRET, ...rest } = exists
+    ? parseEnv(readFileSync(file, 'utf8'))
+    : ({} as Record<string, string>)
+  const secret = KESTREL_SECRET?.trim() || (write ? randomBytes(32).toString('hex') : '')
+  const databaseUrl = DATABASE_URL?.trim() || DEFAULT_DATABASE_URL
+
+  if (write) {
+    if (!exists) {
+      mkdirSync(shopDir, { recursive: true })
+      writeFileSync(file, template(secret), { mode: 0o600 })
+    } else {
+      const missing = [
+        DATABASE_URL?.trim() ? '' : `DATABASE_URL=${DEFAULT_DATABASE_URL}`,
+        KESTREL_SECRET?.trim() ? '' : `KESTREL_SECRET=${secret}`,
+      ].filter(Boolean)
+      if (missing.length)
+        appendFileSync(file, `${readFileSync(file, 'utf8').endsWith('\n') ? '' : '\n'}${missing.join('\n')}\n`)
+    }
+  }
+  return { databaseUrl: resolveDatabaseUrl(databaseUrl, shopDir), secret, rest: rest as Record<string, string>, file }
+}
+
+/**
+ * Points the shop at another database: the DATABASE_URL line of the .env becomes `url`, and the old line stays above
+ * it as a comment so going back is one edit. Everything else in the file is left as it is.
+ */
+export function switchDatabaseUrl(file: string, url: string, now = new Date()) {
+  if (/[\s#"'`]/.test(url)) {
+    throw new UsageError(
+      'The database address has a space, #, quote or backtick in it: percent-encode those characters.',
+    )
+  }
+  const text = readFileSync(file, 'utf8')
+  const line = /^[ \t]*DATABASE_URL[ \t]*=.*$/m
+  const old = line.exec(text)?.[0].trim()
+  const stamp = now.toISOString().slice(0, 10)
+  const replacement = `${old ? `# ${redactUrl(old)}   (before kestrel migrate-db, ${stamp})\n` : ''}DATABASE_URL=${url}`
+  writeFileSync(
+    file,
+    old ? text.replace(line, () => replacement) : `${text}${text.endsWith('\n') ? '' : '\n'}${replacement}\n`,
+  )
+}

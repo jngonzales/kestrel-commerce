@@ -1,0 +1,45 @@
+{
+  "name": "kestrel",
+  "version": "0.16.0",
+  "description": "Look after a Kestrel shop made with create-kestrel: npx kestrel migrate-db moves the embedded database to PostgreSQL",
+  "homepage": "https://kestrel.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kestrel-labs/kestrel.git",
+    "directory": "packages/cli"
+  },
+  "keywords": [
+    "kestrel",
+    "ecommerce",
+    "cli"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "bin": {
+    "kestrel": "./bin/kestrel.mjs"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "node scripts/build.mjs",
+    "dev": "tsx src/main.ts",
+    "typecheck": "tsc",
+    "test": "tsx --test \"tests/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@clack/prompts": "^0.7.0",
+    "@kestrel/cli-core": "workspace:*",
+    "@types/node": "catalog:",
+    "esbuild": "0.28.2",
+    "picocolors": "^1.1.1",
+    "tsx": "^4.23.15"
+  }
+}
