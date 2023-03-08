@@ -1,0 +1,130 @@
+# create-kestrel
+
+Try Kestrel on your machine with one command. It starts the admin (with the API and hosted checkout) and the
+storefront on an embedded database ([PGlite](https://pglite.dev)): no PostgreSQL, no Docker, no clone.
+
+New here? Read [Getting started](getting-started/README.md) first: a short walk-through from the first command to a
+running shop. This page is the full reference.
+
+## Run it
+
+```sh
+npx create-kestrel@latest
+```
+
+This creates the folder `kestrel` in the current folder and keeps the shop's database in it. Want another name?
+Add it: `npx create-kestrel@latest my-shop`.
+
+npm asks once whether to install the package: answer `y`. `@latest` makes npx fetch the newest version instead of
+reusing an older copy from its cache. With pnpm, which does not ask:
+
+```sh
+pnpm create kestrel@latest
+```
+
+The first run downloads Kestrel (one file, about 15 MB) into `~/.kestrel/app/<version>` (shared by all your shops) and checks its SHA-256; later
+runs start straight away. It prints where to open the shop and the admin and opens the admin's setup wizard (use
+`--no-open` to skip that). Ctrl+C stops everything. Nothing is installed globally.
+
+## Run it again
+
+The shop folder has a `package.json`, so from inside it:
+
+```sh
+cd kestrel
+npm start     # or: npm run dev
+```
+
+No `npm install` first: both scripts run `npx --yes create-kestrel@<version> .`, the version that made the folder, and
+npx fetches it into its cache the first time. The same works from the folder above: `npx create-kestrel@latest kestrel`.
+
+## What it does, and why you can trust it
+
+- **It runs on your machine only.** Both servers listen on `127.0.0.1`, and the data stays in the shop folder (`kestrel/data` by default).
+- **It downloads one file.** `create-kestrel` itself fetches only the Kestrel build from this repository's GitHub
+  releases, and checks its SHA-256 before it unpacks anything. The checksum comes from the same place as the file, so it
+  catches a damaged or half-finished download, not a tampered release: the release itself is what you trust.
+- **The source is here.** The package is
+  [`packages/create-kestrel`](https://github.com/kestrel-labs/kestrel/tree/main/packages/create-kestrel) in this
+  repository, and has no runtime dependencies: what you run is one bundled file built from that source.
+- **It is built in the open.** Releases and edge builds are published from GitHub Actions
+  ([release](https://github.com/kestrel-labs/kestrel/blob/main/.github/workflows/release.yaml),
+  [edge](https://github.com/kestrel-labs/kestrel/blob/main/.github/workflows/edge.yaml)) with npm provenance, so a
+  version's page on npmjs.com shows which commit and workflow run built it. The one exception is `0.0.0-edge.init`, the
+  first publish, made by hand to create the package. Publishing uses npm trusted publishing, so there is no long-lived
+  npm token.
+
+## Options
+
+| Option                  | What it does                                                                                              |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- |
+| `[name]`                | The shop's folder, created if needed. `kestrel` when left out; the same folder is the same shop           |
+| `--port <n>`            | Admin, API and checkout. Default `3000`                                                                   |
+| `--storefront-port <n>` | Storefront. Default `4321`                                                                                |
+| `--no-open`             | Do not open the browser                                                                                   |
+| `--with <apps>`         | Also start optional apps next to the shop: `stripe`, `cj`, `shippo` (comma separated, or repeat the flag) |
+| `--app <name>`          | What to start. Only `shop` today; a picker appears once there is more than one                            |
+| `--verbose`             | Show the servers' output while they start (otherwise only if one fails)                                   |
+| `--dry-run`             | Show what would run, and exit                                                                             |
+
+## Apps: Stripe, CJ Dropshipping and Shippo
+
+```sh
+npx create-kestrel@latest --with stripe,cj,shippo
+```
+
+Each app runs as its own small server on this machine only (Stripe on port 4600, CJ Dropshipping on 4700, Shippo on 4900) and keeps
+its data in `<shop folder>/apps/`. The admin finds them by itself; install them from the admin like any app and enter
+your keys there. Stripe cannot reach a `localhost` address, so card payments need a public address for the app or
+`stripe listen`: see the Stripe app's settings page.
+
+## The shop's `.env`
+
+The first run writes `<name>/.env` (readable by you only) with the two settings a shop needs, and every run reads it:
+
+```sh
+DATABASE_URL=pglite:./.pglite     # embedded database in the shop folder (a relative path is relative to it)
+KESTREL_SECRET=<generated once>   # encrypts the provider keys saved in the admin and signs sessions: keep it
+```
+
+- **PostgreSQL:** set `DATABASE_URL=postgres://user:password@host:5432/kestrel` and start again. The migrations are applied
+  on start (`KESTREL_AUTO_MIGRATE`). To move the data from `.pglite/`, run `npx kestrel migrate-db` (see [Getting started](getting-started/README.md)).
+- **Other settings** in the file (SMTP, and so on) are passed to the admin. The address, the ports and the build's own
+  files are set by the CLI and its flags and win over the file.
+- Do not commit or share it. Without `KESTREL_SECRET` the saved provider keys cannot be read: a lost one means a new
+  shop.
+
+The first run also writes a `README.md` (how to run the shop again), a `package.json` (for `npm start`), a `.gitignore` (keeps `.env`, `.pglite/` and the apps' keys out of git) and the
+`docker-compose.yml` (fetched from the repository, the file the [self-hosting docs](https://kestrel.dev/docs/self-hosting/docker) describe: Kestrel, the Stripe
+app and PostgreSQL from prebuilt images), for when the shop should run in Docker instead. Existing files are never
+overwritten.
+
+To start over, delete the shop folder.
+
+## Not for production
+
+One process owns the data, so nothing else can open the folder, and the servers listen on `127.0.0.1` only. Use
+Docker or PostgreSQL for a real shop, and move the data with `npx kestrel migrate-db`.
+
+## Where the build comes from
+
+Each release attaches `kestrel-v<version>-node.tgz` and its `.sha256` (`scripts/build-node-bundle.mjs`, run by the
+release workflow). It holds the admin (bundled into a few files), the built storefront with its themes and the database
+migrations: JavaScript and WebAssembly, so one file serves every OS and CPU. `create-kestrel` asks for the build of its
+own version, so a version without a release says so. The checksum comes from the same place as the file: it catches a
+damaged download, not a tampered release.
+
+`KESTREL_BUNDLE_URL` downloads from somewhere else (a mirror; the `.sha256` sits next to it) and `KESTREL_APP_DIR`
+changes where builds are unpacked.
+
+**Edge:** `npx create-kestrel@edge` (or `pnpm create kestrel@edge`) runs the latest build of `main` (`.github/workflows/edge.yaml` replaces the file of
+the `edge` pre-release on every push). It downloads again only when `main` moved. It can be broken: use a release for
+anything you want to keep.
+
+## Development
+
+```sh
+pnpm --filter create-kestrel dev     # runs src/main.ts (needs a release of this version, or KESTREL_BUNDLE_URL)
+pnpm --filter create-kestrel test
+pnpm build && pnpm --dir templates/storefront build && node scripts/build-node-bundle.mjs 0.14.0 /tmp/bundle
+```

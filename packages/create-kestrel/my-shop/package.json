@@ -1,0 +1,8 @@
+{
+  "name": "my-shop",
+  "private": true,
+  "scripts": {
+    "start": "npx --yes create-kestrel@0.16.0 .",
+    "dev": "npx --yes create-kestrel@0.16.0 ."
+  }
+}

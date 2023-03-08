@@ -1,0 +1,46 @@
+{
+  "name": "create-kestrel",
+  "version": "0.16.0",
+  "description": "Try Kestrel with one command: npx create-kestrel starts the admin and the storefront on an embedded database, nothing else to install",
+  "homepage": "https://kestrel.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kestrel-labs/kestrel.git",
+    "directory": "packages/create-kestrel"
+  },
+  "keywords": [
+    "kestrel",
+    "ecommerce",
+    "create-kestrel",
+    "storefront"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "bin": {
+    "create-kestrel": "./bin/create-kestrel.mjs"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "node scripts/build.mjs",
+    "dev": "tsx src/main.ts",
+    "typecheck": "tsc",
+    "test": "tsx --test \"tests/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@kestrel/cli-core": "workspace:*",
+    "@clack/prompts": "^0.7.0",
+    "@types/node": "catalog:",
+    "esbuild": "0.28.2",
+    "picocolors": "^1.1.1",
+    "tsx": "^4.23.15"
+  }
+}
