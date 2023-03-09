@@ -1,0 +1,19 @@
+{
+  "name": "@kestrel/cj-sdk",
+  "version": "0.16.0",
+  "description": "Typed client for the CJ Dropshipping API: products, variants, inventory, orders, disputes",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@kestrel/log": "workspace:*",
+    "axios": "^1.21.1"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:"
+  }
+}
