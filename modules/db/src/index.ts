@@ -1,0 +1,155 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres'
+import { Pool } from 'pg'
+import { guardEmbeddedClient } from './embedded-guard'
+import { log } from './log'
+
+// DATABASE_URL is a PostgreSQL connection string, or `pglite:<directory>` / `pglite:memory` for the embedded
+// database (PGlite, PostgreSQL compiled to WebAssembly, running inside this process: no server to install).
+// Embedded is for trying Kestrel out: one process owns the data, so nothing else can open it.
+const EMBEDDED_PREFIX = 'pglite:'
+const databaseUrl = process.env.DATABASE_URL ?? ''
+export const isEmbeddedUrl = (url: string) => url.startsWith(EMBEDDED_PREFIX)
+export const isEmbeddedDatabase = isEmbeddedUrl(databaseUrl)
+
+/**
+ * For a test that deletes rows: refuses to go on unless the database is the embedded one. A test sets DATABASE_URL=pglite:memory
+ * before it imports this package; if an import above that line ever runs first, the package has already picked whatever
+ * database the shell or .env names, and the cleanup would run there.
+ */
+export function requireEmbeddedDatabase() {
+  if (!isEmbeddedDatabase) {
+    throw new Error(
+      'This test deletes rows, so it must run on the embedded database. Set DATABASE_URL=pglite:memory before anything imports @kestrel/db.',
+    )
+  }
+}
+
+type Embedded = { migrate: () => Promise<void> }
+// `$client` is the pg Pool (tests and scripts use it); on the embedded database it is the PGlite instance instead
+type Database = NodePgDatabase & { $client: Pool }
+type Created = { db: Database; embedded?: Embedded; pool?: Pool; migrate?: () => Promise<void> }
+
+// Where the migrations are: KESTREL_MIGRATIONS_DIR, next to this module (source), or relative to the working
+// directory (a built server, started from the repository or from apps/admin-ui)
+function migrationsFolder() {
+  const candidates = [
+    process.env.KESTREL_MIGRATIONS_DIR,
+    fileURLToPath(new URL('../migrations', import.meta.url)),
+    join(process.cwd(), 'modules/db/migrations'),
+    join(process.cwd(), '../../modules/db/migrations'),
+  ].filter((dir): dir is string => !!dir)
+  const found = candidates.find((dir) => existsSync(join(dir, 'meta/_journal.json')))
+  if (!found)
+    throw new Error(
+      `Cannot find the database migrations (looked in ${candidates.join(', ')}). Set KESTREL_MIGRATIONS_DIR.`,
+    )
+  return found
+}
+
+async function createEmbedded(): Promise<Created> {
+  const [{ PGlite }, { drizzle: drizzlePglite }, { migrate }] = await Promise.all([
+    import('@electric-sql/pglite'),
+    import('drizzle-orm/pglite'),
+    import('drizzle-orm/pglite/migrator'),
+  ])
+  const location = databaseUrl.slice(EMBEDDED_PREFIX.length).replace(/^\/\/(?=\/)/, '')
+  log.info('embedded PGlite (%s)', location === 'memory' ? 'in memory, lost on exit' : location)
+  // One connection: see embedded-guard.ts
+  const client = guardEmbeddedClient(new PGlite(location === 'memory' ? undefined : location))
+  const embedded = drizzlePglite({ client })
+  return {
+    // Same query API as node-postgres (select, insert, transaction, execute); only the result type of execute differs
+    db: embedded as unknown as Database,
+    embedded: {
+      migrate: () => migrate(embedded, { migrationsFolder: migrationsFolder() }),
+    },
+  }
+}
+
+async function createDb(): Promise<Created> {
+  if (isEmbeddedDatabase) return createEmbedded()
+  const pool = new Pool({ connectionString: databaseUrl })
+  // Where, never the credentials
+  const target = (() => {
+    try {
+      const url = new URL(databaseUrl)
+      return `${url.hostname}:${url.port || 5432}${url.pathname}`
+    } catch {
+      return 'DATABASE_URL'
+    }
+  })()
+  log.info('PostgreSQL %s', target)
+  const db = drizzle({ client: pool })
+  // Opt-in (create-kestrel sets it): a server-side PostgreSQL is otherwise migrated by `pnpm db:migrate` or the deploy
+  const migrateAtStart =
+    process.env.KESTREL_AUTO_MIGRATE === 'true'
+      ? async () => {
+          const { migrate } = await import('drizzle-orm/node-postgres/migrator')
+          await migrate(db, { migrationsFolder: migrationsFolder() })
+        }
+      : undefined
+  return { db, pool, migrate: migrateAtStart }
+}
+
+const globalForDb = globalThis as unknown as { kestrelDb?: Created }
+
+// Reuse the pool (or the embedded database, which must not be opened twice) across hot reloads in dev
+const created = (globalForDb.kestrelDb ??= await createDb())
+export const db = created.db
+
+let prepared: Promise<void> | undefined
+/**
+ * Called once at server start. With the embedded database it applies the migrations, so a fresh data directory just
+ * works. A server-side Postgres is migrated by `pnpm db:migrate` or the deploy's migration step, unless
+ * KESTREL_AUTO_MIGRATE=true asks this server to do it (one server at a time: there is no lock).
+ */
+export function prepareDatabase() {
+  return (prepared ??= created.embedded ? created.embedded.migrate() : (created.migrate?.() ?? Promise.resolve()))
+}
+
+export type Db = typeof db
+export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
+// Services accept either, so they can run standalone or inside a transaction
+export type Conn = Db | Tx
+
+// Promise.all for queries on `conn`: parallel on the pool, one after another inside a transaction
+// (a transaction is a single connection, which runs one query at a time — pg warns, and pg 9 will throw).
+export async function all<T extends readonly unknown[]>(
+  conn: Conn,
+  queries: readonly [...{ [K in keyof T]: () => Promise<T[K]> }],
+): Promise<T> {
+  if (conn === db) return (await Promise.all(queries.map((q) => q()))) as unknown as T
+  const results: unknown[] = []
+  for (const q of queries) results.push(await q())
+  return results as unknown as T
+}
+
+// In-process queue per key, for the embedded database (one process owns it, so no other process to wait for)
+const embeddedLocks = new Map<number, Promise<unknown>>()
+
+/**
+ * Runs `fn` while holding an app-wide lock named by `key`: concurrent callers wait their turn, also across server
+ * processes on PostgreSQL (a session advisory lock on a connection of its own, so `fn` is free to use `db`).
+ * Embedded there is only this process, so a queue is enough.
+ */
+export async function withAdvisoryLock<T>(key: number, fn: () => Promise<T>): Promise<T> {
+  if (!created.pool) {
+    const run = (embeddedLocks.get(key) ?? Promise.resolve()).then(fn, fn)
+    embeddedLocks.set(
+      key,
+      run.catch(() => {}),
+    )
+    return run
+  }
+  const client = await created.pool.connect()
+  try {
+    await client.query('select pg_advisory_lock($1)', [key])
+    return await fn()
+  } finally {
+    await client.query('select pg_advisory_unlock($1)', [key]).catch(() => {})
+    client.release()
+  }
+}
