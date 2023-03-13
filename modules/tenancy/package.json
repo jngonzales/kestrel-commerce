@@ -1,0 +1,36 @@
+{
+  "name": "@kestrel/tenancy",
+  "description": "Tenancy mode, shops, domains, staff, invitations, API tokens and storefront keys",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/tenancy.schema.ts",
+    "./contract": "./src/tenancy.contract.ts",
+    "./router": "./src/tenancy.router.ts",
+    "./module": "./src/tenancy.module.ts"
+  },
+  "scripts": {
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@orpc/server": "catalog:",
+    "@kestrel/channels": "workspace:*",
+    "@kestrel/content": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/db": "workspace:*",
+    "@kestrel/languages": "workspace:*",
+    "@kestrel/kit": "workspace:*",
+    "@kestrel/log": "workspace:*",
+    "@kestrel/rpc": "workspace:*",
+    "@kestrel/webhooks": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "drizzle-zod": "^0.8.3",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "^4.23.15"
+  }
+}

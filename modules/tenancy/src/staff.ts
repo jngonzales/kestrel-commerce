@@ -1,0 +1,147 @@
+// Shop staff: members and invitations (Better Auth organization tables). Managed here rather than through
+// Better Auth's organization endpoints, which only accept the shop's own members — super admins can manage
+// every shop. Invitees still accept through Better Auth (/organization/accept-invitation), which reads these rows.
+import { randomBytes } from 'node:crypto'
+import { and, asc, eq, gt, sql } from 'drizzle-orm'
+import { db } from '@kestrel/db'
+import type { ShopRole } from './resolve'
+
+export { StaffError, type StaffErrorCode } from './tenancy.errors'
+import { StaffError } from './tenancy.errors'
+import { shopInvitations, shopMembers, type StaffRole } from './tenancy.schema'
+import { user } from '@kestrel/core/schema'
+
+// Who is acting: their role in this shop (super admins act as owners) and user id
+export type Actor = { userId: string; role: ShopRole; superAdmin: boolean }
+
+// Owners and super admins manage anyone but owners; admins manage plain staff only. Nobody edits themselves.
+function assertCanManage(actor: Actor, target: { userId: string; role: string }) {
+  if (target.userId === actor.userId) throw new StaffError('FORBIDDEN', "You can't change your own access")
+  if (target.role === 'owner') throw new StaffError('FORBIDDEN', "Owners can't be changed here")
+  if (target.role === 'admin' && !actor.superAdmin && actor.role !== 'owner') {
+    throw new StaffError('FORBIDDEN', 'Only owners can change admins')
+  }
+}
+
+export async function listMembers(shopId: string) {
+  return (
+    db
+      .select({
+        id: shopMembers.id,
+        userId: shopMembers.userId,
+        role: shopMembers.role,
+        createdAt: shopMembers.createdAt,
+        name: user.name,
+        email: user.email,
+      })
+      .from(shopMembers)
+      .innerJoin(user, eq(user.id, shopMembers.userId))
+      .where(eq(shopMembers.organizationId, shopId))
+      // Owners, then admins, then staff (created_at isn't comparable: Better Auth writes it from JS, defaultNow() from the DB)
+      .orderBy(sql`case ${shopMembers.role} when 'owner' then 0 when 'admin' then 1 else 2 end`, asc(user.name))
+  )
+}
+
+// Pending and not expired
+export async function listInvitations(shopId: string) {
+  return db
+    .select()
+    .from(shopInvitations)
+    .where(
+      and(
+        eq(shopInvitations.organizationId, shopId),
+        eq(shopInvitations.status, 'pending'),
+        gt(shopInvitations.expiresAt, new Date()),
+      ),
+    )
+    .orderBy(asc(shopInvitations.createdAt))
+}
+
+// Re-inviting an email replaces its open invitation (fresh link and expiry)
+export async function invite(
+  shopId: string,
+  actor: Actor,
+  input: { email: string; role: StaffRole },
+  expiresInDays: number,
+) {
+  const email = input.email.trim().toLowerCase()
+  if (input.role === 'admin' && !actor.superAdmin && actor.role !== 'owner') {
+    throw new StaffError('FORBIDDEN', 'Only owners can invite admins')
+  }
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({ id: shopMembers.id })
+      .from(shopMembers)
+      .innerJoin(user, eq(user.id, shopMembers.userId))
+      .where(and(eq(shopMembers.organizationId, shopId), eq(user.email, email)))
+    if (existing) throw new StaffError('ALREADY_MEMBER', `${email} is already a member of this shop`)
+
+    await tx
+      .update(shopInvitations)
+      .set({ status: 'canceled' })
+      .where(
+        and(
+          eq(shopInvitations.organizationId, shopId),
+          eq(sql`lower(${shopInvitations.email})`, email),
+          eq(shopInvitations.status, 'pending'),
+        ),
+      )
+    const [invitation] = await tx
+      .insert(shopInvitations)
+      .values({
+        // The id is the secret in the invite link: random, unguessable
+        id: randomBytes(24).toString('base64url'),
+        organizationId: shopId,
+        email,
+        role: input.role,
+        status: 'pending',
+        expiresAt: new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000),
+        inviterId: actor.userId,
+      })
+      .returning()
+    return invitation!
+  })
+}
+
+// Returns null when there is no open invitation with this id in the shop
+export async function cancelInvitation(shopId: string, id: string) {
+  const [invitation] = await db
+    .update(shopInvitations)
+    .set({ status: 'canceled' })
+    .where(
+      and(
+        eq(shopInvitations.organizationId, shopId),
+        eq(shopInvitations.id, id),
+        eq(shopInvitations.status, 'pending'),
+      ),
+    )
+    .returning()
+  return invitation ?? null
+}
+
+async function getMember(shopId: string, memberId: string) {
+  const [member] = await db
+    .select()
+    .from(shopMembers)
+    .where(and(eq(shopMembers.organizationId, shopId), eq(shopMembers.id, memberId)))
+  if (!member) throw new StaffError('NOT_FOUND', 'Member not found')
+  return member
+}
+
+export async function updateRole(shopId: string, actor: Actor, memberId: string, role: StaffRole) {
+  const member = await getMember(shopId, memberId)
+  assertCanManage(actor, member)
+  if (role === 'admin' && !actor.superAdmin && actor.role !== 'owner') {
+    throw new StaffError('FORBIDDEN', 'Only owners can make someone an admin')
+  }
+  const [updated] = await db.update(shopMembers).set({ role }).where(eq(shopMembers.id, memberId)).returning()
+  return updated!
+}
+
+// Removes access to this shop; the account itself stays
+export async function removeMember(shopId: string, actor: Actor, memberId: string) {
+  const member = await getMember(shopId, memberId)
+  assertCanManage(actor, member)
+  await db.delete(shopMembers).where(eq(shopMembers.id, memberId))
+  return member
+}
