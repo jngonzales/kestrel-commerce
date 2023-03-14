@@ -1,0 +1,38 @@
+{
+  "name": "@kestrel/orders",
+  "description": "Orders, line items with price snapshots, and status transitions",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/orders.schema.ts",
+    "./contract": "./src/orders.contract.ts",
+    "./router": "./src/orders.router.ts",
+    "./module": "./src/orders.module.ts"
+  },
+  "scripts": {
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@orpc/server": "catalog:",
+    "@kestrel/catalog": "workspace:*",
+    "@kestrel/channels": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/custom-fields": "workspace:*",
+    "@kestrel/customers": "workspace:*",
+    "@kestrel/db": "workspace:*",
+    "@kestrel/kit": "workspace:*",
+    "@kestrel/pricing": "workspace:*",
+    "@kestrel/rpc": "workspace:*",
+    "@kestrel/storefront-sdk": "workspace:*",
+    "@kestrel/webhooks": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "drizzle-zod": "^0.8.3",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "^4.23.15"
+  }
+}

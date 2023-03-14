@@ -1,0 +1,37 @@
+{
+  "name": "@kestrel/catalog",
+  "description": "Products, collections, options and variants",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/catalog.schema.ts",
+    "./contract": "./src/catalog.contract.ts",
+    "./router": "./src/catalog.router.ts",
+    "./module": "./src/catalog.module.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "tsx --test \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@orpc/server": "catalog:",
+    "@kestrel/channels": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/custom-fields": "workspace:*",
+    "@kestrel/db": "workspace:*",
+    "@kestrel/languages": "workspace:*",
+    "@kestrel/kit": "workspace:*",
+    "@kestrel/rpc": "workspace:*",
+    "@kestrel/webhooks": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "drizzle-zod": "^0.8.3",
+    "sanitize-html": "^2.18.1",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/sanitize-html": "^2.16.2",
+    "tsx": "^4.23.15"
+  }
+}

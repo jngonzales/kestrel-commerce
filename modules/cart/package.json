@@ -1,0 +1,42 @@
+{
+  "name": "@kestrel/cart",
+  "description": "Server-side carts and checkout, which turns a cart into an order in one transaction",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/cart.schema.ts",
+    "./contract": "./src/cart.contract.ts",
+    "./router": "./src/cart.router.ts",
+    "./module": "./src/cart.module.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "tsx --test \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@orpc/server": "catalog:",
+    "@kestrel/apps": "workspace:*",
+    "@kestrel/catalog": "workspace:*",
+    "@kestrel/channels": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/customers": "workspace:*",
+    "@kestrel/db": "workspace:*",
+    "@kestrel/kit": "workspace:*",
+    "@kestrel/log": "workspace:*",
+    "@kestrel/marketplace-sdk": "workspace:*",
+    "@kestrel/orders": "workspace:*",
+    "@kestrel/payments": "workspace:*",
+    "@kestrel/pricing": "workspace:*",
+    "@kestrel/rpc": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "drizzle-zod": "^0.8.3",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@kestrel/email": "workspace:*",
+    "@kestrel/webhooks": "workspace:*",
+    "@types/node": "catalog:",
+    "tsx": "^4.23.15"
+  }
+}
