@@ -1,0 +1,36 @@
+{
+  "name": "@kestrel/gift-cards",
+  "description": "Gift cards: balances, codes and redemption",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/gift-cards.schema.ts",
+    "./contract": "./src/gift-cards.contract.ts",
+    "./router": "./src/gift-cards.router.ts",
+    "./module": "./src/gift-cards.module.ts"
+  },
+  "scripts": {
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@orpc/server": "catalog:",
+    "@kestrel/auth": "workspace:*",
+    "@kestrel/cart": "workspace:*",
+    "@kestrel/catalog": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/db": "workspace:*",
+    "@kestrel/kit": "workspace:*",
+    "@kestrel/orders": "workspace:*",
+    "@kestrel/rpc": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "drizzle-zod": "^0.8.3",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@kestrel/channels": "workspace:*",
+    "@types/node": "catalog:",
+    "tsx": "^4.23.15"
+  }
+}

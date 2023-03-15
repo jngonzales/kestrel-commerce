@@ -1,0 +1,39 @@
+{
+  "name": "@kestrel/payments",
+  "description": "Payment sessions, and the payment methods payments apps register",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/payments.schema.ts",
+    "./contract": "./src/payments.contract.ts",
+    "./router": "./src/payments.router.ts",
+    "./module": "./src/payments.module.ts",
+    "./worker": "./src/worker.ts"
+  },
+  "scripts": {
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@orpc/server": "catalog:",
+    "@kestrel/apps": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/customers": "workspace:*",
+    "@kestrel/db": "workspace:*",
+    "@kestrel/kit": "workspace:*",
+    "@kestrel/log": "workspace:*",
+    "@kestrel/marketplace-sdk": "workspace:*",
+    "@kestrel/orders": "workspace:*",
+    "@kestrel/rpc": "workspace:*",
+    "@kestrel/webhooks": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "drizzle-zod": "^0.8.3",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@kestrel/channels": "workspace:*",
+    "@types/node": "catalog:",
+    "tsx": "^4.23.15"
+  }
+}
