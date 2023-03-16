@@ -1,0 +1,44 @@
+{
+  "name": "@kestrel/storefront",
+  "description": "The public Storefront API: products, collections, pages, menus, theme, cart, customer accounts and checkout, for any storefront",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./router": "./src/storefront.router.ts",
+    "./module": "./src/storefront.module.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "tsx --test \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@orpc/server": "catalog:",
+    "@kestrel/apps": "workspace:*",
+    "@kestrel/auth": "workspace:*",
+    "@kestrel/cart": "workspace:*",
+    "@kestrel/catalog": "workspace:*",
+    "@kestrel/channels": "workspace:*",
+    "@kestrel/content": "workspace:*",
+    "@kestrel/custom-fields": "workspace:*",
+    "@kestrel/customers": "workspace:*",
+    "@kestrel/db": "workspace:*",
+    "@kestrel/languages": "workspace:*",
+    "@kestrel/email": "workspace:*",
+    "@kestrel/kit": "workspace:*",
+    "@kestrel/log": "workspace:*",
+    "@kestrel/orders": "workspace:*",
+    "@kestrel/rpc": "workspace:*",
+    "@kestrel/storefront-sdk": "workspace:*",
+    "@kestrel/tenancy": "workspace:*",
+    "@kestrel/theme": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@kestrel/core": "workspace:*",
+    "@kestrel/payments": "workspace:*",
+    "@kestrel/pricing": "workspace:*",
+    "@types/node": "catalog:",
+    "tsx": "^4.23.15"
+  }
+}
