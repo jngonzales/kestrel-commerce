@@ -1,0 +1,135 @@
+// Sends queued notification emails (email_deliveries). Runs in the app process (started from
+// apps/admin-ui/src/server.ts); rows are claimed with SKIP LOCKED, so several app instances can run it side by
+// side. Same shape as the webhook delivery worker.
+import { and, eq, inArray, lt, lte, ne, sql } from 'drizzle-orm'
+import { type Conn } from '@kestrel/db'
+import { queueDue, reasonToSkip } from './abandoned-carts'
+import { send } from './email'
+import { log } from './log'
+import { emailDeliveries, type EmailDelivery } from './email.schema'
+
+// Wait after the nth failed attempt; one more failure after the last is final (6 attempts over ~6h)
+const RETRY_DELAYS_S = [60, 5 * 60, 30 * 60, 2 * 3600, 3 * 3600]
+// A claimed row is invisible to other workers this long; if this process dies mid-send it's retried after
+const LEASE_MS = 120_000
+const BATCH = 10
+const POLL_MS = 3_000
+// Finished deliveries are kept this long for the admin's list of recent emails
+const RETENTION_MS = 30 * 24 * 3600_000
+
+async function claim(conn: Conn): Promise<EmailDelivery[]> {
+  return conn.transaction(async (tx) => {
+    const due = await tx
+      .select({ id: emailDeliveries.id })
+      .from(emailDeliveries)
+      .where(and(eq(emailDeliveries.status, 'pending'), lte(emailDeliveries.nextAttemptAt, sql`now()`)))
+      .orderBy(emailDeliveries.nextAttemptAt)
+      .limit(BATCH)
+      .for('update', { skipLocked: true })
+    if (due.length === 0) return []
+    return tx
+      .update(emailDeliveries)
+      .set({ nextAttemptAt: sql`now() + ${LEASE_MS} * interval '1 millisecond'` })
+      .where(
+        inArray(
+          emailDeliveries.id,
+          due.map((d) => d.id),
+        ),
+      )
+      .returning()
+  })
+}
+
+async function attempt(delivery: EmailDelivery, conn: Conn) {
+  const now = new Date()
+  const attempts = delivery.attempts + 1
+  let status: EmailDelivery['status'] = 'sent'
+  let lastError: string | null = null
+  try {
+    // A reminder for a checkout that was completed (or unsubscribed from) since it was queued is dropped
+    const reason = await reasonToSkip(delivery, conn)
+    if (reason) {
+      await conn
+        .update(emailDeliveries)
+        .set({ status: 'skipped', lastError: reason, attempts, lastAttemptAt: now })
+        .where(eq(emailDeliveries.id, delivery.id))
+      return
+    }
+    // Email turned off since it was queued: dropped, not retried
+    const { sent } = await send(
+      delivery.shopId,
+      { to: delivery.to, subject: delivery.subject, html: delivery.html },
+      conn,
+    )
+    if (!sent) {
+      status = 'skipped'
+      lastError = 'Email is off'
+    }
+  } catch (error) {
+    lastError = error instanceof Error ? error.message : String(error)
+    status = RETRY_DELAYS_S[attempts - 1] === undefined ? 'failed' : 'pending'
+  }
+  const retryIn = RETRY_DELAYS_S[attempts - 1] ?? 0
+  await conn
+    .update(emailDeliveries)
+    .set({
+      attempts,
+      lastAttemptAt: now,
+      lastError,
+      status,
+      ...(status === 'pending' && { nextAttemptAt: new Date(now.getTime() + retryIn * 1000) }),
+    })
+    .where(eq(emailDeliveries.id, delivery.id))
+}
+
+/** One pass: sends what's due. Returns how many deliveries it handled. */
+export async function processDue(conn: Conn) {
+  const deliveries = await claim(conn)
+  // One at a time: SMTP providers rate-limit bursts, and order emails aren't urgent to the second
+  for (const delivery of deliveries) await attempt(delivery, conn)
+  return deliveries.length
+}
+
+async function pruneFinished(conn: Conn) {
+  await conn
+    .delete(emailDeliveries)
+    .where(
+      and(ne(emailDeliveries.status, 'pending'), lt(emailDeliveries.createdAt, new Date(Date.now() - RETENTION_MS))),
+    )
+}
+
+const globalForWorker = globalThis as unknown as { emailWorker?: { stop: () => void } }
+
+/** Starts the polling loop once per process (dev hot reloads reuse it). Returns a stop function. */
+export function startEmailWorker(conn: Conn) {
+  if (globalForWorker.emailWorker) return globalForWorker.emailWorker.stop
+  let stopped = false
+  let timer: NodeJS.Timeout | undefined
+  let lastPrune = 0
+
+  const loop = async () => {
+    let handled = 0
+    try {
+      // Reminders for abandoned checkouts are queued here, then sent by the same pass
+      await queueDue(conn)
+      handled = await processDue(conn)
+      if (Date.now() - lastPrune > 3600_000) {
+        lastPrune = Date.now()
+        await pruneFinished(conn)
+      }
+    } catch (error) {
+      log.error({ err: error }, 'delivery worker failed')
+    }
+    // A full batch means more may be due: go again right away
+    if (!stopped) timer = setTimeout(loop, handled === BATCH ? 0 : POLL_MS)
+  }
+  timer = setTimeout(loop, POLL_MS)
+
+  const stop = () => {
+    stopped = true
+    clearTimeout(timer)
+    globalForWorker.emailWorker = undefined
+  }
+  globalForWorker.emailWorker = { stop }
+  return stop
+}

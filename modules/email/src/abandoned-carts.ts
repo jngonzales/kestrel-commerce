@@ -1,0 +1,172 @@
+// Abandoned cart reminders. The email worker calls `queueDue` every pass: it finds checkouts that still have
+// an email and an idle cart, and queues the reminder in the outbox like any other email.
+// A checkout is reminded once: the outbox has a unique row per cart and notification, so a second pass, a second
+// app instance or a retry can't send it twice. A cart that was checked out meanwhile is never picked (its status
+// is no longer `active`), and the worker checks again right before sending.
+import { withStorefrontUrl } from '@kestrel/tenancy'
+import { and, asc, eq, gt, gte, inArray, lte, sql } from 'drizzle-orm'
+import { all, type Conn } from '@kestrel/db'
+import { isSuppressed, unsubscribeToken } from './abandoned-settings'
+import {
+  appUrl,
+  checkoutScope,
+  renderEmail,
+  shopScope,
+  sourceOf,
+  templateRows,
+  type CheckoutLine,
+} from './notifications'
+import { log } from './log'
+import { shops } from '@kestrel/core/schema'
+import { productImages } from '@kestrel/catalog/schema'
+import {
+  abandonedCartSettings as settings,
+  emailDeliveries as emailDeliveriesTable,
+  emailSettings,
+} from './email.schema'
+import { cartLines as cartLinesTable, carts as cartsTable } from '@kestrel/cart/schema'
+import { customers } from '@kestrel/customers/schema'
+import { products, productVariants } from '@kestrel/catalog/schema'
+
+const BATCH = 20
+// A cart that went quiet longer ago than its delay plus this is left alone: turning the feature on must not mail
+// every old checkout at once
+const GRACE_MS = 24 * 3600_000
+
+// On the connection it is called with: inside queueOne's transaction that is `tx`, and a query on `db` there would
+// wait for the transaction for ever on the embedded database (one connection)
+async function linesOf(conn: Conn, cartId: string): Promise<CheckoutLine[]> {
+  const rows = await conn
+    .select({ line: cartLinesTable, variant: productVariants, product: products })
+    .from(cartLinesTable)
+    .innerJoin(productVariants, eq(productVariants.id, cartLinesTable.variantId))
+    .innerJoin(products, eq(products.id, productVariants.productId))
+    .where(and(eq(cartLinesTable.cartId, cartId), eq(products.status, 'active')))
+    .orderBy(asc(cartLinesTable.createdAt), asc(cartLinesTable.id))
+  const productIds = [...new Set(rows.map((r) => r.product.id))]
+  const images = productIds.length
+    ? await conn
+        .select({ productId: productImages.productId, url: productImages.url })
+        .from(productImages)
+        .where(and(inArray(productImages.productId, productIds), eq(productImages.position, 0)))
+    : []
+  return rows.map(({ line, variant, product }) => ({
+    title: product.title,
+    variantTitle: variant.optionsKey === '' ? null : variant.title,
+    quantity: line.quantity,
+    unitPriceCents: variant.priceCents,
+    imageUrl: variant.imageUrl ?? images.find((i) => i.productId === product.id)?.url ?? null,
+  }))
+}
+
+/** Carts that have waited out their shop's delay, in shops that send abandoned cart emails and haven't been reminded */
+async function dueCarts(conn: Conn) {
+  const carts = cartsTable
+  const cartLines = cartLinesTable
+  const emailDeliveries = emailDeliveriesTable
+  return conn
+    .select({ id: carts.id })
+    .from(carts)
+    .innerJoin(settings, and(eq(settings.shopId, carts.shopId), eq(settings.enabled, true)))
+    .innerJoin(emailSettings, and(eq(emailSettings.shopId, carts.shopId), eq(emailSettings.active, true)))
+    .where(
+      and(
+        eq(carts.status, 'active'),
+        sql`${carts.email} is not null`,
+        gt(carts.expiresAt, sql`now()`),
+        lte(carts.updatedAt, sql`now() - ${settings.delayMinutes} * interval '1 minute'`),
+        gte(
+          carts.updatedAt,
+          sql`now() - (${settings.delayMinutes} * interval '1 minute' + ${GRACE_MS} * interval '1 millisecond')`,
+        ),
+        sql`exists (select 1 from ${cartLines} where ${cartLines.cartId} = ${carts.id})`,
+        sql`not exists (select 1 from ${emailDeliveries} where ${emailDeliveries.cartId} = ${carts.id} and ${emailDeliveries.notification} = 'abandoned_cart')`,
+      ),
+    )
+    .orderBy(asc(carts.updatedAt))
+    .limit(BATCH)
+}
+
+async function queueOne(cartId: string, conn: Conn) {
+  await conn.transaction(async (tx) => {
+    // Another instance may be on the same cart: whoever locks it first queues it
+    const [cart] = await tx
+      .select()
+      .from(cartsTable)
+      .where(and(eq(cartsTable.id, cartId), eq(cartsTable.status, 'active')))
+      .for('update', { skipLocked: true })
+    if (!cart?.email) return
+    const [row] = await tx.select().from(shops).where(eq(shops.id, cart.shopId))
+    if (!row) return
+    const base = { shopId: cart.shopId, notification: 'abandoned_cart' as const, cartId: cart.id, to: cart.email }
+
+    // Not sent: recorded as such, so the cart isn't looked at again (and starves nothing behind it)
+    const skip = async (reason: string) => {
+      await tx
+        .insert(emailDeliveriesTable)
+        .values({ ...base, subject: '', html: '', status: 'skipped', lastError: reason })
+        .onConflictDoNothing()
+    }
+    if (await isSuppressed(tx, cart.shopId, cart.email)) return skip('Unsubscribed')
+    const lines = await linesOf(tx, cart.id)
+    if (lines.length === 0) return skip('Nothing left in the cart')
+    const shop = await withStorefrontUrl(row, tx)
+    const cartEmail = cart.email
+    const [templates, [customer]] = await all(tx, [
+      () => templateRows(tx, cart.shopId, ['abandoned_cart', 'layout']),
+      () =>
+        tx
+          .select({ name: customers.name })
+          .from(customers)
+          .where(and(eq(customers.shopId, cart.shopId), eq(customers.email, cartEmail))),
+    ])
+    const scope = {
+      shop: shopScope(shop),
+      ...checkoutScope(
+        { token: cart.token, firstName: customer?.name?.split(' ')[0] ?? null, lines },
+        `${appUrl()}/unsubscribe/${unsubscribeToken(cart.shopId, cart.email)}`,
+      ),
+    }
+    const email = await renderEmail(
+      'abandoned_cart',
+      sourceOf('abandoned_cart', templates.get('abandoned_cart')),
+      sourceOf('layout', templates.get('layout')).body,
+      scope,
+      { fallback: true },
+    )
+    if (email.problem)
+      log.warn({ notification: 'abandoned_cart', shopId: cart.shopId }, 'template problem: %s', email.problem.message)
+    await tx
+      .insert(emailDeliveriesTable)
+      .values({ ...base, subject: email.subject, html: email.html })
+      .onConflictDoNothing()
+  })
+}
+
+/** One pass: queues the reminders that are due. Returns how many carts it handled. */
+export async function queueDue(conn: Conn) {
+  const due = await dueCarts(conn)
+  for (const { id } of due) {
+    try {
+      await queueOne(id, conn)
+    } catch (error) {
+      log.error({ err: error, cartId: id }, 'abandoned cart failed')
+    }
+  }
+  return due.length
+}
+
+/**
+ * Whether a queued reminder should still go out: the cart is still open and its owner hasn't unsubscribed since.
+ * Returns the reason it shouldn't, or null.
+ */
+export async function reasonToSkip(delivery: { shopId: string; cartId: string | null; to: string }, conn: Conn) {
+  if (!delivery.cartId) return null
+  const [cart] = await conn
+    .select({ status: cartsTable.status })
+    .from(cartsTable)
+    .where(eq(cartsTable.id, delivery.cartId))
+  if (cart?.status !== 'active') return 'Checkout was completed'
+  if (await isSuppressed(conn, delivery.shopId, delivery.to)) return 'Unsubscribed'
+  return null
+}

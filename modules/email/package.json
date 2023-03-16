@@ -1,0 +1,43 @@
+{
+  "name": "@kestrel/email",
+  "description": "SMTP settings, sending email and notification templates",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/email.schema.ts",
+    "./contract": "./src/email.contract.ts",
+    "./router": "./src/email.router.ts",
+    "./module": "./src/email.module.ts",
+    "./worker": "./src/worker.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "tsx --test \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@kestrel/cart": "workspace:*",
+    "@kestrel/catalog": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/customers": "workspace:*",
+    "@kestrel/db": "workspace:*",
+    "@kestrel/kit": "workspace:*",
+    "@kestrel/log": "workspace:*",
+    "@kestrel/orders": "workspace:*",
+    "@kestrel/rpc": "workspace:*",
+    "@kestrel/storefront-sdk": "workspace:*",
+    "@kestrel/tenancy": "workspace:*",
+    "@kestrel/webhooks": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "drizzle-zod": "^0.8.3",
+    "liquidjs": "10.30.1",
+    "nodemailer": "10.4.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@orpc/server": "catalog:",
+    "@kestrel/channels": "workspace:*",
+    "@types/node": "catalog:",
+    "tsx": "^4.23.15"
+  }
+}
