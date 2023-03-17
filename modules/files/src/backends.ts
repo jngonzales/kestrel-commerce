@@ -1,0 +1,157 @@
+// Settings → Storage: where a shop's new uploads go. The server's disk by default, or an S3-compatible
+// bucket. Saving a bucket runs the connection test first, so a broken setup never receives uploads.
+import { randomUUID } from 'node:crypto'
+import { and, desc, eq, inArray } from 'drizzle-orm'
+import type { Conn } from '@kestrel/db'
+import { decryptSecret, encryptSecret } from '@kestrel/db/secrets'
+import { isMultiTenant } from '@kestrel/tenancy'
+import { assertPublicHost } from '@kestrel/webhooks/network'
+import { FilesError } from './files.errors'
+import { storageBackends, type S3Config, type StorageBackend } from './files.schema'
+import { publicFileUrl, s3Provider } from './s3'
+import { localDisk, type StorageProvider } from './storage'
+
+/** Omit secretAccessKey to keep the one already saved */
+export type S3Input = S3Config & { secretAccessKey?: string }
+
+const providerOf = (row: StorageBackend) => s3Provider(row.id, row.config, decryptSecret(row.secretAccessKey))
+
+// Most recent bucket setup (active or not): the form starts from it after switching back to the disk
+async function latest(shopId: string, conn: Conn) {
+  const [row] = await conn
+    .select()
+    .from(storageBackends)
+    .where(eq(storageBackends.shopId, shopId))
+    .orderBy(desc(storageBackends.createdAt))
+    .limit(1)
+  return row ?? null
+}
+
+// Never returns the secret, only whether one is saved
+export async function getSettings(shopId: string, conn: Conn) {
+  const row = await latest(shopId, conn)
+  return {
+    provider: row?.active ? ('s3' as const) : ('local' as const),
+    s3: row ? { ...row.config, hasSecret: true } : null,
+  }
+}
+
+export async function activeStorage(shopId: string, conn: Conn): Promise<StorageProvider> {
+  const [row] = await conn
+    .select()
+    .from(storageBackends)
+    .where(and(eq(storageBackends.shopId, shopId), eq(storageBackends.active, true)))
+  return row ? providerOf(row) : localDisk
+}
+
+/** Providers for the backends files point at, by file.storage */
+export async function providersFor(shopId: string, names: string[], conn: Conn) {
+  const ids = [...new Set(names)].filter((n) => n !== localDisk.name)
+  const rows = ids.length
+    ? await conn
+        .select()
+        .from(storageBackends)
+        .where(and(eq(storageBackends.shopId, shopId), inArray(storageBackends.id, ids)))
+    : []
+  return new Map<string, StorageProvider>([
+    [localDisk.name, localDisk],
+    ...rows.map((r) => [r.id, providerOf(r)] as const),
+  ])
+}
+
+async function secretFor(shopId: string, input: S3Input, conn: Conn) {
+  if (input.secretAccessKey) return input.secretAccessKey
+  const row = await latest(shopId, conn)
+  if (!row) throw new FilesError('SECRET_REQUIRED', 'Enter the secret access key')
+  return decryptSecret(row.secretAccessKey)
+}
+
+const configOf = ({ secretAccessKey: _, ...config }: S3Input): S3Config => config
+
+export interface TestStep {
+  step: 'upload' | 'public' | 'delete'
+  ok: boolean
+  error?: string
+}
+
+const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+// Uploads a small file, loads it from the public URL like a storefront would, then deletes it
+export async function testS3(shopId: string, input: S3Input, conn: Conn) {
+  const config = configOf(input)
+  const provider = s3Provider('test', config, await secretFor(shopId, input, conn))
+  const key = `${shopId}/kestrel-connection-test-${randomUUID()}.txt`
+  const steps: TestStep[] = []
+  const run = async (step: TestStep['step'], fn: () => Promise<void>) => {
+    try {
+      await fn()
+      steps.push({ step, ok: true })
+      return true
+    } catch (error) {
+      steps.push({ step, ok: false, error: message(error) })
+      return false
+    }
+  }
+
+  if (await run('upload', () => provider.put(key, new TextEncoder().encode('ok'), 'text/plain'))) {
+    await run('public', async () => {
+      const url = new URL(publicFileUrl(config, key))
+      if (isMultiTenant) await assertPublicHost(url)
+      const res = await fetch(url, {
+        redirect: isMultiTenant ? 'manual' : 'follow',
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (!res.ok)
+        throw new Error(`${url.origin} answered HTTP ${String(res.status)}. Is public access on for this bucket?`)
+    })
+    await run('delete', () => provider.delete(key))
+  }
+  return { ok: steps.every((s) => s.ok), steps }
+}
+
+const sameLocation = (a: S3Config, b: S3Config) =>
+  a.endpoint === b.endpoint &&
+  a.bucket === b.bucket &&
+  a.publicUrl === b.publicUrl &&
+  a.forcePathStyle === b.forcePathStyle &&
+  a.region === b.region
+
+// New uploads go to this bucket. Same bucket as before (e.g. rotated keys): that row is updated; otherwise
+// a new row, so files already uploaded keep the setup that matches where they are.
+export async function useS3(shopId: string, input: S3Input, conn: Conn) {
+  const result = await testS3(shopId, input, conn)
+  const failed = result.steps.find((s) => !s.ok)
+  if (failed)
+    throw new FilesError(
+      'STORAGE_FAILED',
+      `Connection test failed (${failed.step}): ${failed.error ?? 'unknown error'}`,
+    )
+
+  const config = configOf(input)
+  const secretAccessKey = encryptSecret(await secretFor(shopId, input, conn))
+  const previous = await latest(shopId, conn)
+  await conn.transaction(async (tx) => {
+    await tx
+      .update(storageBackends)
+      .set({ active: false, updatedAt: new Date() })
+      .where(and(eq(storageBackends.shopId, shopId), eq(storageBackends.active, true)))
+    if (previous && sameLocation(previous.config, config)) {
+      await tx
+        .update(storageBackends)
+        .set({ config, secretAccessKey, active: true, updatedAt: new Date() })
+        .where(eq(storageBackends.id, previous.id))
+    } else {
+      await tx.insert(storageBackends).values({ shopId, config, secretAccessKey, active: true })
+    }
+  })
+  return getSettings(shopId, conn)
+}
+
+// Back to the server's disk for new uploads; files in the bucket stay there and keep working
+export async function useLocal(shopId: string, conn: Conn) {
+  await conn
+    .update(storageBackends)
+    .set({ active: false, updatedAt: new Date() })
+    .where(and(eq(storageBackends.shopId, shopId), eq(storageBackends.active, true)))
+  return getSettings(shopId, conn)
+}

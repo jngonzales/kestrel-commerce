@@ -1,0 +1,33 @@
+{
+  "name": "@kestrel/content",
+  "description": "Menus and pages",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/content.schema.ts",
+    "./contract": "./src/content.contract.ts",
+    "./router": "./src/content.router.ts",
+    "./module": "./src/content.module.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "tsx --test \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@orpc/server": "catalog:",
+    "@kestrel/catalog": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/db": "workspace:*",
+    "@kestrel/languages": "workspace:*",
+    "@kestrel/kit": "workspace:*",
+    "@kestrel/rpc": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "drizzle-zod": "^0.8.3",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "^4.23.15"
+  }
+}
