@@ -1,0 +1,35 @@
+{
+  "name": "@kestrel/customers",
+  "description": "Shop-scoped customers and storefront accounts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/customers.schema.ts",
+    "./contract": "./src/customers.contract.ts",
+    "./router": "./src/customers.router.ts",
+    "./module": "./src/customers.module.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "tsx --test \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@orpc/server": "catalog:",
+    "@kestrel/auth": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/custom-fields": "workspace:*",
+    "@kestrel/db": "workspace:*",
+    "@kestrel/kit": "workspace:*",
+    "@kestrel/log": "workspace:*",
+    "@kestrel/rpc": "workspace:*",
+    "@kestrel/webhooks": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "drizzle-zod": "^0.8.3",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "^4.23.15"
+  }
+}

@@ -1,0 +1,117 @@
+// Business logic only — no HTTP / oRPC / Hono imports in this module.
+// Every query is scoped by shopId; there is deliberately no unscoped variant.
+import { and, count, desc, eq, ilike, inArray, or, type SQL } from 'drizzle-orm'
+import { type Conn } from '@kestrel/db'
+import { customFieldService, type CustomFieldUpdates } from '@kestrel/custom-fields'
+import { emit } from '@kestrel/webhooks'
+import { customers, type NewCustomer } from './customers.schema'
+
+type CustomerInput = Pick<NewCustomer, 'email' | 'name' | 'phone' | 'userId'> & { customFields?: CustomFieldUpdates }
+
+const normalizeEmail = (email: string) => email.trim().toLowerCase()
+
+/** How many rows the shop has, counted up to `cap`: enough to know if a list is empty or how many rows to draw, and
+ * as fast for a million rows as for ten. */
+export async function countUpTo(shopId: string, cap: number, conn: Conn) {
+  const rows = await conn.select({ id: customers.id }).from(customers).where(eq(customers.shopId, shopId)).limit(cap)
+  return rows.length
+}
+
+// `search` matches email or name (case-insensitive, substring)
+export async function list(shopId: string, opts: { limit: number; offset: number; search?: string }, conn: Conn) {
+  const filters: (SQL | undefined)[] = [eq(customers.shopId, shopId)]
+  if (opts.search) {
+    const pattern = `%${opts.search.replace(/[\\%_]/g, '\\$&')}%`
+    filters.push(or(ilike(customers.email, pattern), ilike(customers.name, pattern)))
+  }
+  const where = and(...filters)
+  const [items, [counted]] = await Promise.all([
+    conn.select().from(customers).where(where).orderBy(desc(customers.createdAt)).limit(opts.limit).offset(opts.offset),
+    conn.select({ total: count() }).from(customers).where(where),
+  ])
+  return { items, total: counted?.total ?? 0 }
+}
+
+export async function getById(shopId: string, id: string, conn: Conn) {
+  const [row] = await conn
+    .select()
+    .from(customers)
+    .where(and(eq(customers.shopId, shopId), eq(customers.id, id)))
+  return row ?? null
+}
+
+export async function getByEmail(shopId: string, email: string, conn: Conn) {
+  const [row] = await conn
+    .select()
+    .from(customers)
+    .where(and(eq(customers.shopId, shopId), eq(customers.email, normalizeEmail(email))))
+  return row ?? null
+}
+
+// Returns null when the email is already taken in this shop
+export async function create(shopId: string, { customFields, ...input }: CustomerInput, conn: Conn) {
+  const [row] = await conn
+    .insert(customers)
+    .values({
+      ...input,
+      email: normalizeEmail(input.email),
+      customFields: await customFieldService.merge(shopId, 'customer', customFields ?? {}, {}, conn),
+      shopId,
+    })
+    .onConflictDoNothing()
+    .returning()
+  if (row) await emit(conn, shopId, 'customer.created', () => row)
+  return row ?? null
+}
+
+// Returns null when not found. Callers check email uniqueness first (getByEmail).
+export async function update(
+  shopId: string,
+  id: string,
+  {
+    customFields,
+    ...patch
+  }: Partial<Pick<NewCustomer, 'email' | 'name' | 'phone'>> & { customFields?: CustomFieldUpdates },
+  conn: Conn,
+) {
+  const existing = customFields ? await getById(shopId, id, conn) : null
+  if (customFields && !existing) return null
+  const [row] = await conn
+    .update(customers)
+    .set({
+      ...patch,
+      ...(patch.email && { email: normalizeEmail(patch.email) }),
+      ...(customFields && {
+        customFields: await customFieldService.merge(
+          shopId,
+          'customer',
+          customFields,
+          existing?.customFields ?? {},
+          conn,
+        ),
+      }),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(customers.shopId, shopId), eq(customers.id, id)))
+    .returning()
+  if (row) await emit(conn, shopId, 'customer.updated', () => row)
+  return row ?? null
+}
+
+export async function removeMany(shopId: string, ids: string[], conn: Conn) {
+  if (!ids.length) return 0
+  const deleted = await conn
+    .delete(customers)
+    .where(and(eq(customers.shopId, shopId), inArray(customers.id, ids)))
+    .returning({ id: customers.id })
+  return deleted.length
+}
+
+// Used by checkout: guests are matched by email within the shop
+export async function findOrCreateByEmail(shopId: string, input: CustomerInput, conn: Conn) {
+  const created = await create(shopId, input, conn)
+  if (created) return created
+  const found = await getByEmail(shopId, input.email, conn)
+  if (!found) throw new Error('The customer was neither created nor found')
+  return found
+}

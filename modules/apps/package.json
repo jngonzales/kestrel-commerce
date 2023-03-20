@@ -1,0 +1,36 @@
+{
+  "name": "@kestrel/apps",
+  "description": "Installable apps: installations, OAuth codes and tokens, instance signing keys, marketplace sync",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/apps.schema.ts",
+    "./contract": "./src/apps.contract.ts",
+    "./router": "./src/apps.router.ts",
+    "./module": "./src/apps.module.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "tsx --test \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@orpc/server": "catalog:",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/db": "workspace:*",
+    "@kestrel/kit": "workspace:*",
+    "@kestrel/log": "workspace:*",
+    "@kestrel/marketplace-sdk": "workspace:*",
+    "@kestrel/rpc": "workspace:*",
+    "@kestrel/storefront-sdk": "workspace:*",
+    "@kestrel/tenancy": "workspace:*",
+    "@kestrel/theme": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "drizzle-zod": "^0.8.3",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "^4.23.15"
+  }
+}

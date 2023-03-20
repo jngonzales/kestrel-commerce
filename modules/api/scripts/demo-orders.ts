@@ -1,0 +1,23 @@
+// Adds backdated sample orders and customers to a shop so the dashboard analytics show realistic numbers.
+//   pnpm demo:orders [--shop <id>] [--days 90] [--replace | --wipe]
+// --replace removes the earlier sample data (customers on @demo.kestrel.test and their orders) first.
+// --wipe deletes ALL of the shop's orders first (real ones too) and restarts numbering at #1001.
+import { db } from '@kestrel/db'
+import { DEFAULT_SHOP_ID } from '@kestrel/tenancy'
+import { deleteAllOrders, deleteDemoOrders, seedDemoOrders } from './lib/demo-orders'
+
+const arg = (name: string) => {
+  const i = process.argv.indexOf(`--${name}`)
+  return i === -1 ? undefined : process.argv[i + 1]
+}
+
+const shopId = arg('shop') ?? DEFAULT_SHOP_ID
+if (process.argv.includes('--wipe')) {
+  console.log(`Deleted ${await deleteAllOrders(shopId)} existing orders.`)
+} else if (process.argv.includes('--replace')) {
+  const removed = await deleteDemoOrders(shopId)
+  console.log(`Removed ${removed} sample customers and their orders.`)
+}
+const { orders, customers } = await seedDemoOrders(shopId, { days: Number(arg('days') ?? 90) })
+console.log(`Added ${orders} orders from ${customers} customers to shop "${shopId}".`)
+await db.$client.end()

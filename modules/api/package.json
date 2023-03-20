@@ -1,0 +1,60 @@
+{
+  "name": "@kestrel/api",
+  "description": "Hono app and oRPC router: the admin, storefront and OpenAPI endpoints",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./router": "./src/router.ts",
+    "./reference": "./src/reference.ts"
+  },
+  "scripts": {
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc",
+    "demo:seed": "tsx --env-file-if-exists=../../.env scripts/demo-seed.ts",
+    "demo:products": "tsx --env-file-if-exists=../../.env scripts/demo-products.ts",
+    "demo:orders": "tsx --env-file-if-exists=../../.env scripts/demo-orders.ts",
+    "demo:reset": "tsx scripts/demo-reset.ts"
+  },
+  "dependencies": {
+    "@orpc/openapi": "^1.16.2",
+    "@orpc/server": "catalog:",
+    "@orpc/zod": "^1.16.2",
+    "@kestrel/ai": "workspace:*",
+    "@kestrel/apps": "workspace:*",
+    "@kestrel/auth": "workspace:*",
+    "@kestrel/cart": "workspace:*",
+    "@kestrel/catalog": "workspace:*",
+    "@kestrel/channels": "workspace:*",
+    "@kestrel/content": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/custom-fields": "workspace:*",
+    "@kestrel/customers": "workspace:*",
+    "@kestrel/email": "workspace:*",
+    "@kestrel/files": "workspace:*",
+    "@kestrel/kit": "workspace:*",
+    "@kestrel/log": "workspace:*",
+    "@kestrel/marketplace-sdk": "workspace:*",
+    "@kestrel/orders": "workspace:*",
+    "@kestrel/payments": "workspace:*",
+    "@kestrel/gift-cards": "workspace:*",
+    "@kestrel/languages": "workspace:*",
+    "@kestrel/pricing": "workspace:*",
+    "@kestrel/privacy": "workspace:*",
+    "@kestrel/rpc": "workspace:*",
+    "@kestrel/storefront": "workspace:*",
+    "@kestrel/storefront-sdk": "workspace:*",
+    "@kestrel/tenancy": "workspace:*",
+    "@kestrel/theme": "workspace:*",
+    "@kestrel/webhooks": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "drizzle-zod": "^0.8.3",
+    "hono": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@kestrel/db": "workspace:*",
+    "@types/node": "catalog:",
+    "tsx": "^4.23.15"
+  }
+}

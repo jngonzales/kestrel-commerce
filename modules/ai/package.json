@@ -1,0 +1,38 @@
+{
+  "name": "@kestrel/ai",
+  "description": "AI providers, settings and text generation (built-in or through installed apps)",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/ai.schema.ts",
+    "./contract": "./src/ai.contract.ts",
+    "./router": "./src/ai.router.ts",
+    "./module": "./src/ai.module.ts"
+  },
+  "scripts": {
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
+    "@orpc/server": "catalog:",
+    "@kestrel/apps": "workspace:*",
+    "@kestrel/catalog": "workspace:*",
+    "@kestrel/content": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/db": "workspace:*",
+    "@kestrel/kit": "workspace:*",
+    "@kestrel/marketplace-sdk": "workspace:*",
+    "@kestrel/rpc": "workspace:*",
+    "@kestrel/tenancy": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "drizzle-zod": "^0.8.3",
+    "openai": "^7.54.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "^4.23.15"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@kestrel/custom-fields",
+  "description": "Custom field definitions and values for products, orders and customers",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/custom-fields.schema.ts",
+    "./contract": "./src/custom-fields.contract.ts",
+    "./router": "./src/custom-fields.router.ts",
+    "./module": "./src/custom-fields.module.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "tsx --test \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@orpc/server": "catalog:",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/db": "workspace:*",
+    "@kestrel/kit": "workspace:*",
+    "@kestrel/rpc": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "drizzle-zod": "^0.8.3",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@kestrel/core": "workspace:*",
+    "@types/node": "catalog:",
+    "tsx": "^4.23.15"
+  }
+}
