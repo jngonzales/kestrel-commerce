@@ -1,0 +1,150 @@
+import { ShoppingCartIcon } from 'lucide-react'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo } from 'react'
+import { DataTable, columnHelper } from '@/components/admin/data-table'
+import { useListParams } from '@/components/admin/list-params'
+import { FinancialStatusBadge, FulfillmentStatusBadge } from '@/components/admin/order-status'
+import { EmptyState } from '@/components/admin/empty-state'
+import { PageHeader } from '@/components/admin/page-header'
+import { SearchInput } from '@/components/admin/search-input'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { formatDate, orderName } from '@/lib/format'
+import { formatMoney } from '@/lib/money'
+import { client, orpc, type Inputs, type Outputs } from '@/lib/orpc'
+import { DeleteSelectedButton } from '@/components/admin/delete-selected-button'
+import { ExportOrdersDialog } from './export-orders'
+import { ImportOrdersDialog } from './import-orders'
+
+type Order = Outputs['admin']['orders']['list']['items'][number]
+
+const col = columnHelper<Order>()
+// The channel column only appears once the shop has more than one
+const columnsFor = (channels: { id: string; name: string }[] | undefined) => [
+  col.accessor('orderNumber', { header: 'Order', cell: (c) => orderName(c.getValue()) }),
+  col.accessor('createdAt', {
+    header: 'Date',
+    cell: (c) => formatDate(c.getValue()),
+    meta: { className: 'tabular-nums' },
+  }),
+  col.accessor('email', {
+    header: 'Customer',
+    cell: ({ row: { original: o } }) => o.customerName ?? o.email,
+  }),
+  ...(channels && channels.length > 1
+    ? [
+        col.accessor('channelId', {
+          header: 'Channel',
+          cell: ({ row: { original: o } }) => channels.find((c) => c.id === o.channelId)?.name ?? '—',
+        }),
+      ]
+    : []),
+  col.accessor('financialStatus', {
+    header: 'Payment',
+    cell: ({ row: { original: o } }) => <FinancialStatusBadge status={o.financialStatus} />,
+  }),
+  col.accessor('fulfillmentStatus', {
+    header: 'Fulfillment',
+    cell: ({ row: { original: o } }) =>
+      o.cancelledAt ? (
+        <Badge variant="destructive">Cancelled</Badge>
+      ) : (
+        <FulfillmentStatusBadge status={o.fulfillmentStatus} />
+      ),
+  }),
+  col.accessor('totalCents', {
+    header: 'Total',
+    cell: (c) => formatMoney(c.getValue(), c.row.original.currency),
+    meta: { className: 'text-right tabular-nums' },
+  }),
+]
+
+type ListFilters = Omit<Inputs['admin']['orders']['list'], 'limit' | 'offset' | 'search' | 'customerId'>
+
+// Shopify's default order views
+const VIEWS: { key: string; label: string; filters: ListFilters; empty: string }[] = [
+  { key: '', label: 'All', filters: {}, empty: 'No orders yet. Orders placed at checkout show up here.' },
+  {
+    key: 'unpaid',
+    label: 'Unpaid',
+    filters: { financialStatus: 'pending', cancelled: false },
+    empty: 'No unpaid orders.',
+  },
+  {
+    key: 'unfulfilled',
+    label: 'Unfulfilled',
+    filters: { fulfillmentStatus: 'unfulfilled', cancelled: false },
+    empty: 'Nothing to ship.',
+  },
+  { key: 'cancelled', label: 'Cancelled', filters: { cancelled: true }, empty: 'No cancelled orders.' },
+]
+
+export function OrderList() {
+  const queryClient = useQueryClient()
+  const { page, pageSize, search, range, setPage, setSearch, filter, setFilter } = useListParams()
+  const channels = useQuery(orpc.admin.channels.list.queryOptions())
+  const columns = useMemo(() => columnsFor(channels.data), [channels.data])
+  const view = VIEWS.find((v) => v.key === filter('view')) ?? VIEWS[0]!
+  const { data, error, isPending } = useQuery({
+    ...orpc.admin.orders.list.queryOptions({ input: { ...range, ...view.filters, search: search || undefined } }),
+    // Keep the current page visible while the next one loads
+    placeholderData: keepPreviousData,
+  })
+
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="Orders"
+        actions={
+          <div className="flex items-center gap-2">
+            <ImportOrdersDialog />
+            <ExportOrdersDialog />
+          </div>
+        }
+      />
+      <div className="flex flex-wrap gap-1" role="group" aria-label="Order views">
+        {VIEWS.map((v) => (
+          <Button
+            key={v.key || 'all'}
+            size="sm"
+            variant={v === view ? 'secondary' : 'ghost'}
+            aria-pressed={v === view}
+            onClick={() => setFilter('view', v.key)}
+          >
+            {v.label}
+          </Button>
+        ))}
+      </div>
+      <SearchInput value={search} onSearch={setSearch} placeholder="Search by order number, email or customer" />
+      <DataTable
+        countKey={search || view.key ? undefined : 'orders'}
+        columns={columns}
+        data={data?.items}
+        getRowId={(o) => o.id}
+        rowLink={(o) => ({ to: '/admin/orders/$id', params: { id: o.id } })}
+        isPending={isPending}
+        error={error}
+        empty={search ? `No orders match “${search}”.` : view.empty}
+        blank={
+          search || view.key ? undefined : (
+            <EmptyState icon={ShoppingCartIcon} title="Your orders will show up here">
+              When a customer checks out, the order appears in this list.
+            </EmptyState>
+          )
+        }
+        pagination={{ page, pageSize, total: data?.total, onPageChange: setPage }}
+        selectionActions={(ids, clearSelection) => (
+          <DeleteSelectedButton
+            ids={ids}
+            entity={ids.length === 1 ? 'order' : 'orders'}
+            remove={(selected) => client.admin.orders.deleteMany({ ids: selected })}
+            onDeleted={async () => {
+              clearSelection()
+              await queryClient.invalidateQueries({ queryKey: orpc.admin.orders.key() })
+            }}
+          />
+        )}
+      />
+    </div>
+  )
+}

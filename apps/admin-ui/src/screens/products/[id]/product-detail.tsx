@@ -1,0 +1,347 @@
+import { ORPCError } from '@orpc/client'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useController } from 'react-hook-form'
+import { useId } from 'react'
+import { toast } from 'sonner'
+import { z } from 'zod'
+import { productFields } from '@kestrel/catalog/contract'
+import {
+  CheckboxField,
+  FormError,
+  SelectField,
+  TagsField,
+  TextField,
+  TextareaField,
+  setServerError,
+  useZodForm,
+} from '@/components/admin/form'
+import { PageHeader } from '@/components/admin/page-header'
+import { RichTextEditor } from '@/components/admin/rich-text-editor'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { Skeleton } from '@/components/ui/skeleton'
+import { CustomFieldsFormCard, draftOf, toValue } from '@/components/admin/custom-fields-card'
+import { orpc, type Outputs } from '@/lib/orpc'
+import { GenerateClassification, GenerateDescription, GenerateSeo } from './ai-generate'
+import { TranslationsCard, translatableProductFields } from '@/components/admin/translations-card'
+import { ProductChannelsCard } from './channels-card'
+import { MediaCard } from './media-card'
+import { VariantsCard } from './variants-card'
+
+export type Product = Outputs['admin']['products']['get']
+
+const productForm = productFields
+  .pick({
+    title: true,
+    status: true,
+    descriptionHtml: true,
+    vendor: true,
+    productType: true,
+    isGiftCard: true,
+    tags: true,
+    slug: true,
+    seo: true,
+  })
+  .extend({
+    // The custom fields as the inputs hold them (text), by key; a field that is not set is absent
+    customFields: z.record(z.string(), z.string().optional()),
+  })
+
+const statusOptions = [
+  { value: 'active', label: 'Active' },
+  { value: 'draft', label: 'Draft' },
+  { value: 'archived', label: 'Archived' },
+] as const
+
+const back = { to: '/admin/products', label: 'Products' } as const
+
+function plainTextToHtml(text: string | null) {
+  if (!text) return ''
+  return text
+    .split(/\n{2,}/)
+    .map(
+      (paragraph) =>
+        `<p>${paragraph.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('\n', '<br>')}</p>`,
+    )
+    .join('')
+}
+
+type CustomFieldDefinition = Outputs['admin']['customFields']['list'][number]
+
+// Every defined custom field has a key (undefined when the product has no value), so the form's own comparison
+// with its defaults sees "not set" and "cleared" as the same thing
+const toValues = (p: Product, definitions: CustomFieldDefinition[]) => ({
+  title: p.title,
+  status: p.status,
+  descriptionHtml: p.descriptionHtml ?? plainTextToHtml(p.description),
+  vendor: p.vendor,
+  productType: p.productType,
+  isGiftCard: p.isGiftCard,
+  tags: p.tags,
+  slug: p.slug,
+  seo: { title: p.seoTitle, description: p.seoDescription },
+  customFields: Object.fromEntries(
+    definitions.map((f) => [f.key, p.customFields[f.key] === undefined ? undefined : draftOf(p.customFields[f.key]!)]),
+  ),
+})
+
+export function ProductDetail({ id, currency }: { id: string; currency: string }) {
+  const product = useQuery(orpc.admin.products.get.queryOptions({ input: { id } }))
+  // Needed for the form's defaults, so the editor waits for it
+  const definitions = useQuery(orpc.admin.customFields.list.queryOptions({ input: { resource: 'product' } }))
+
+  if (product.isPending || definitions.isPending) {
+    return (
+      <div className="space-y-4">
+        <PageHeader back={back} title={<Skeleton className="h-8 w-64" />} />
+        <Skeleton className="h-96 w-full" />
+      </div>
+    )
+  }
+  if (product.error) {
+    // BAD_REQUEST: the id in the URL isn't a valid uuid
+    const notFound =
+      product.error instanceof ORPCError && (product.error.code === 'NOT_FOUND' || product.error.code === 'BAD_REQUEST')
+    return (
+      <div className="space-y-4">
+        <PageHeader back={back} title={notFound ? 'Product not found' : 'Could not load product'} />
+        <p className="text-muted-foreground">
+          {notFound ? 'It may have been removed, or it belongs to another shop.' : product.error.message}
+        </p>
+      </div>
+    )
+  }
+  // key: fresh form defaults if another product loads into this view
+  return (
+    <ProductEditor
+      key={product.data.id}
+      product={product.data}
+      definitions={definitions.data ?? []}
+      currency={currency}
+    />
+  )
+}
+
+function ProductEditor({
+  product,
+  definitions,
+  currency,
+}: {
+  product: Product
+  definitions: CustomFieldDefinition[]
+  currency: string
+}) {
+  const queryClient = useQueryClient()
+  const descriptionId = useId()
+  const form = useZodForm(productForm, { defaultValues: toValues(product, definitions) })
+  const description = useController({ control: form.control, name: 'descriptionHtml' })
+  const update = useMutation(orpc.admin.products.update.mutationOptions())
+  const addToCollection = useMutation(orpc.admin.collections.addProduct.mutationOptions())
+  const { isDirty, isSubmitting, dirtyFields } = form.formState
+
+  // The type and tags join the form as unsaved changes; collections are memberships, which save on their own
+  const applyClassification = async (suggestion: { productType: string; tags: string[]; collections: string[] }) => {
+    if (suggestion.productType) form.setValue('productType', suggestion.productType, { shouldDirty: true })
+    const tags = form.getValues('tags') ?? []
+    form.setValue('tags', [...new Set([...tags, ...suggestion.tags])], { shouldDirty: true })
+    const missing = suggestion.collections.filter((handle) => !product.collectionSlugs.includes(handle))
+    if (!missing.length) return
+    try {
+      const all = await queryClient.fetchQuery(orpc.admin.collections.list.queryOptions({ input: { limit: 100 } }))
+      for (const handle of missing) {
+        const found = all.find((c) => c.slug === handle)
+        if (found) await addToCollection.mutateAsync({ id: found.id, productId: product.id })
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: orpc.admin.products.get.queryKey({ input: { id: product.id } }) }),
+        queryClient.invalidateQueries({ queryKey: orpc.admin.collections.key() }),
+      ])
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not add to collections')
+    }
+  }
+
+  const onSubmit = form.handleSubmit(async ({ descriptionHtml, customFields: drafts, ...values }) => {
+    // Only the custom fields that changed are sent (null clears one)
+    const changed = definitions.filter((f) => dirtyFields.customFields?.[f.key])
+    const badNumber = changed.find(
+      (f) => f.type === 'number' && drafts[f.key]?.trim() && !Number.isFinite(Number(drafts[f.key])),
+    )
+    if (badNumber) return void toast.error(`${badNumber.label} must be a number`)
+    try {
+      const saved = await update.mutateAsync({
+        id: product.id,
+        ...values,
+        ...(changed.length && {
+          customFields: Object.fromEntries(changed.map((f) => [f.key, toValue(f, drafts[f.key] ?? '')])),
+        }),
+        // Only replace the stored description when the rich-text field was edited.
+        ...(dirtyFields.descriptionHtml && { descriptionHtml: descriptionHtml || null, description: null }),
+      })
+      queryClient.setQueryData(orpc.admin.products.get.queryKey({ input: { id: product.id } }), saved)
+      await queryClient.invalidateQueries({ queryKey: orpc.admin.products.list.key() })
+      form.reset(toValues(saved, definitions))
+      toast.success('Product saved')
+    } catch (error) {
+      setServerError(form, error, { CONFLICT: 'slug' })
+    }
+  })
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        back={back}
+        title={
+          <span className="flex items-center gap-3">
+            {product.title}
+            <Badge variant={product.status === 'active' ? 'default' : 'secondary'} className="capitalize">
+              {product.status}
+            </Badge>
+          </span>
+        }
+      />
+
+      <form onSubmit={onSubmit} noValidate className="space-y-6">
+        {isDirty && (
+          <div className="sticky top-2 z-10 flex items-center justify-between gap-3 rounded-xl bg-card/95 px-4 py-2 shadow-flyout backdrop-blur">
+            <span className="text-sm font-medium">Unsaved changes</span>
+            <div className="flex gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={() => form.reset()}>
+                Discard
+              </Button>
+              <Button data-ph-capture="save-product" type="submit" size="sm" disabled={isSubmitting}>
+                {isSubmitting ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        )}
+        <FormError form={form} />
+
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          <div className="space-y-6">
+            <Card>
+              <CardContent>
+                <FieldGroup>
+                  <TextField control={form.control} name="title" label="Title" />
+                  <Field>
+                    <FieldLabel htmlFor={descriptionId}>Description</FieldLabel>
+                    <RichTextEditor
+                      id={descriptionId}
+                      value={description.field.value ?? ''}
+                      onChange={description.field.onChange}
+                      invalid={!!description.fieldState.error}
+                      actions={
+                        <GenerateDescription
+                          productId={product.id}
+                          onUse={(html) => form.setValue('descriptionHtml', html, { shouldDirty: true })}
+                        />
+                      }
+                    />
+                  </Field>
+                </FieldGroup>
+              </CardContent>
+            </Card>
+
+            <MediaCard product={product} />
+
+            <VariantsCard product={product} currency={currency} />
+          </div>
+
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Status</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <SelectField
+                  control={form.control}
+                  name="status"
+                  label="Status"
+                  options={statusOptions}
+                  description="Only active products are visible on storefronts."
+                />
+              </CardContent>
+            </Card>
+
+            <ProductChannelsCard productId={product.id} />
+
+            <TranslationsCard resource="product" resourceId={product.id} fields={translatableProductFields(product)} />
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Organization</CardTitle>
+                <CardAction>
+                  <GenerateClassification
+                    productId={product.id}
+                    onUse={(suggestion) => void applyClassification(suggestion)}
+                  />
+                </CardAction>
+              </CardHeader>
+              <CardContent>
+                <FieldGroup>
+                  <TextField control={form.control} name="vendor" label="Vendor" />
+                  <TextField control={form.control} name="productType" label="Product type" />
+                  <CheckboxField control={form.control} name="isGiftCard" label="This product is a gift card" />
+                  <TagsField control={form.control} name="tags" label="Tags" description="Separate with commas" />
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Collections</p>
+                    {product.collectionSlugs.length ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {product.collectionSlugs.map((slug) => (
+                          <Badge key={slug} variant="outline">
+                            {slug}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Not in any collection</p>
+                    )}
+                  </div>
+                </FieldGroup>
+              </CardContent>
+            </Card>
+
+            <CustomFieldsFormCard resource="product" control={form.control} />
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Search engine listing</CardTitle>
+                <CardDescription>How this product appears in search results and its URL.</CardDescription>
+                <CardAction>
+                  <GenerateSeo
+                    productId={product.id}
+                    onUse={(seo) => {
+                      form.setValue('seo.title', seo.title, { shouldDirty: true })
+                      form.setValue('seo.description', seo.description, { shouldDirty: true })
+                    }}
+                  />
+                </CardAction>
+              </CardHeader>
+              <CardContent>
+                <FieldGroup>
+                  <TextField control={form.control} name="slug" label="URL handle" autoComplete="off" />
+                  <TextField
+                    control={form.control}
+                    name="seo.title"
+                    label="Page title"
+                    nullable
+                    placeholder={product.title}
+                  />
+                  <TextareaField
+                    control={form.control}
+                    name="seo.description"
+                    label="Meta description"
+                    nullable
+                    rows={3}
+                  />
+                </FieldGroup>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </form>
+    </div>
+  )
+}

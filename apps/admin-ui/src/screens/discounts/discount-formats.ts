@@ -1,0 +1,169 @@
+import { csvTable, type CsvRow } from '@/lib/csv'
+import { formatMinorInput, minorPerUnit } from '@/lib/money'
+
+export type DiscountSource = 'shopify' | 'woocommerce' | 'kestrel'
+
+/** Canonical discount: percentage `value` is a whole percent; fixed_amount `value` is cents; free_shipping has no value. */
+export type DiscountRecord = {
+  code: string
+  type: 'percentage' | 'fixed_amount' | 'free_shipping'
+  value: number
+  minSubtotalCents: number
+  usageLimit: number | null
+  oncePerCustomer: boolean
+  active: boolean
+  startsAt: string | null
+  endsAt: string | null
+}
+
+const yes = (value: string | undefined, fallback: boolean) =>
+  value ? ['true', '1', 'yes', 'active'].includes(value.toLowerCase()) : fallback
+const toMinor = (value: string | undefined, currency: string) =>
+  value ? Math.round(Number(value) * minorPerUnit(currency)) : 0
+const money = (minor: number | null, currency: string) => formatMinorInput(minor ?? 0, currency)
+const iso = (value: Date | string | null) => (value ? new Date(value).toISOString() : '')
+
+export type ExportableDiscount = Omit<DiscountRecord, 'startsAt' | 'endsAt' | 'minSubtotalCents'> & {
+  minSubtotalCents: number | null
+  startsAt: Date | string | null
+  endsAt: Date | string | null
+}
+
+type Format = {
+  required: string[]
+  headers: string[]
+  read: (
+    row: CsvRow,
+    currency: string,
+  ) => Omit<DiscountRecord, 'startsAt' | 'endsAt' | 'type'> & { startsAt: string; endsAt: string; type: string }
+  write: (d: ExportableDiscount, currency: string) => unknown[]
+}
+
+// WooCommerce coupons (percent / fixed_cart) and Shopify discount-code sheets carry amounts in currency units
+export const formats: Record<DiscountSource, Format> = {
+  kestrel: {
+    required: ['Code', 'Type', 'Value'],
+    headers: [
+      'Code',
+      'Type',
+      'Value',
+      'Minimum subtotal cents',
+      'Usage limit',
+      'Once per customer',
+      'Active',
+      'Starts at',
+      'Ends at',
+    ],
+    read: (r) => ({
+      code: r.Code ?? '',
+      type: (r.Type ?? '').toLowerCase(),
+      value: Number(r.Value),
+      minSubtotalCents: Number(r['Minimum subtotal cents'] || 0),
+      usageLimit: r['Usage limit'] ? Number(r['Usage limit']) : null,
+      oncePerCustomer: yes(r['Once per customer'], false),
+      active: yes(r.Active, true),
+      startsAt: r['Starts at'] ?? '',
+      endsAt: r['Ends at'] ?? '',
+    }),
+    write: (d) => [
+      d.code,
+      d.type,
+      d.value,
+      d.minSubtotalCents,
+      d.usageLimit,
+      d.oncePerCustomer,
+      d.active,
+      iso(d.startsAt),
+      iso(d.endsAt),
+    ],
+  },
+  shopify: {
+    required: ['Discount Code', 'Type', 'Value'],
+    headers: [
+      'Discount Code',
+      'Type',
+      'Value',
+      'Minimum purchase amount',
+      'Usage limit',
+      'One use per customer',
+      'Status',
+      'Start date',
+      'End date',
+    ],
+    read: (r, currency) => {
+      const kind = (r.Type ?? '').toLowerCase()
+      const percentage = kind.startsWith('percent')
+      return {
+        code: r['Discount Code'] ?? '',
+        type: kind.includes('shipping') ? 'free_shipping' : percentage ? 'percentage' : 'fixed_amount',
+        value: kind.includes('shipping') ? 0 : percentage ? Number(r.Value) : toMinor(r.Value, currency),
+        minSubtotalCents: toMinor(r['Minimum purchase amount'], currency),
+        usageLimit: r['Usage limit'] ? Number(r['Usage limit']) : null,
+        oncePerCustomer: yes(r['One use per customer'], false),
+        active: yes(r.Status, true),
+        startsAt: r['Start date'] ?? '',
+        endsAt: r['End date'] ?? '',
+      }
+    },
+    write: (d, currency) => [
+      d.code,
+      d.type === 'percentage' ? 'Percentage' : d.type === 'free_shipping' ? 'Free shipping' : 'Fixed amount',
+      d.type === 'percentage' ? d.value : money(d.value, currency),
+      money(d.minSubtotalCents, currency),
+      d.usageLimit,
+      d.oncePerCustomer ? 'TRUE' : 'FALSE',
+      d.active ? 'Active' : 'Disabled',
+      iso(d.startsAt),
+      iso(d.endsAt),
+    ],
+  },
+  woocommerce: {
+    required: ['code', 'discount_type', 'amount'],
+    headers: [
+      'code',
+      'discount_type',
+      'amount',
+      'free_shipping',
+      'minimum_amount',
+      'usage_limit',
+      'usage_limit_per_user',
+      'status',
+      'date_starts',
+      'date_expires',
+    ],
+    read: (r, currency) => {
+      const percentage = (r.discount_type ?? '').toLowerCase() === 'percent'
+      const freeShipping = yes(r.free_shipping, false) && !Number(r.amount)
+      return {
+        code: r.code ?? '',
+        type: freeShipping ? 'free_shipping' : percentage ? 'percentage' : 'fixed_amount',
+        value: freeShipping ? 0 : percentage ? Number(r.amount) : toMinor(r.amount, currency),
+        minSubtotalCents: toMinor(r.minimum_amount, currency),
+        usageLimit: r.usage_limit ? Number(r.usage_limit) : null,
+        oncePerCustomer: r.usage_limit_per_user === '1',
+        active: (r.status || 'publish').toLowerCase() === 'publish',
+        startsAt: r.date_starts ?? '',
+        endsAt: r.date_expires ?? '',
+      }
+    },
+    write: (d, currency) => [
+      d.code,
+      d.type === 'percentage' ? 'percent' : 'fixed_cart',
+      d.type === 'percentage' ? d.value : money(d.value, currency),
+      d.type === 'free_shipping' ? 1 : '',
+      money(d.minSubtotalCents, currency),
+      d.usageLimit,
+      d.oncePerCustomer ? 1 : '',
+      d.active ? 'publish' : 'draft',
+      iso(d.startsAt),
+      iso(d.endsAt),
+    ],
+  },
+}
+
+export function discountsCsv(source: DiscountSource, discounts: ExportableDiscount[], currency: string) {
+  return csvTable(
+    formats[source].headers,
+    discounts.map((discount) => formats[source].write(discount, currency)),
+  )
+}

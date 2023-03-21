@@ -1,0 +1,117 @@
+import { Link, useNavigate, useRouter } from '@tanstack/react-router'
+import { useEffect, useState, type FormEvent } from 'react'
+import { toast } from 'sonner'
+import { authClient } from '@kestrel/auth/client'
+import type { SocialProvider } from '@kestrel/auth/providers'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
+import { clearAdminContext } from '@/lib/admin-context'
+import { oauthErrorMessage } from './oauth-errors'
+import { SocialButtons } from '@/components/auth/social-buttons'
+
+// Only same-app admin paths, so ?next= can't be used to send people elsewhere
+const safeNext = (next?: string) => (next?.startsWith('/admin/') && !next.startsWith('//') ? next : '/admin')
+
+export function LoginForm({
+  providers,
+  error,
+  next,
+  defaults,
+  openSignup,
+}: {
+  providers: SocialProvider[]
+  error?: string
+  next?: string
+  defaults?: { email: string; password: string } | null
+  openSignup?: boolean
+}) {
+  const destination = safeNext(next)
+  const navigate = useNavigate()
+  const router = useRouter()
+  const [pending, setPending] = useState(false)
+  // Until the page is interactive a click on Login would submit the form natively: a GET that puts the
+  // password in the URL and reloads the page, losing what was typed
+  const [ready, setReady] = useState(false)
+  useEffect(() => setReady(true), [])
+
+  // OAuth failures come back as /admin/login?error=...
+  useEffect(() => {
+    if (error) toast.error(oauthErrorMessage(error))
+  }, [error])
+
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const form = new FormData(e.currentTarget)
+    setPending(true)
+    const { error } = await authClient.signIn.email({
+      email: String(form.get('email')),
+      password: String(form.get('password')),
+    })
+    if (error) {
+      setPending(false)
+      toast.error(error.message ?? 'Could not sign in')
+      return
+    }
+    // Stay on "Logging in…" until the admin is on screen, so the form can't be submitted twice or look like it failed
+    clearAdminContext(router)
+    await navigate({ href: destination, replace: true })
+    await router.invalidate()
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Login to your account</CardTitle>
+        <CardDescription>Enter your email below to login to your account</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={onSubmit}>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="email">Email</FieldLabel>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                placeholder="m@example.com"
+                defaultValue={defaults?.email}
+                required
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="password">Password</FieldLabel>
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                defaultValue={defaults?.password}
+                required
+              />
+            </Field>
+            <Field>
+              <Button data-ph-capture="login" type="submit" disabled={pending || !ready}>
+                {pending ? 'Logging in…' : 'Login'}
+              </Button>
+            </Field>
+            <SocialButtons providers={providers} mode="login" callbackURL={destination} />
+            <Field>
+              <FieldDescription className="text-center">
+                {openSignup ? (
+                  <>
+                    New here? <Link to="/admin/signup">Start your store</Link>
+                  </>
+                ) : (
+                  'New here? Ask a shop owner to invite you.'
+                )}
+              </FieldDescription>
+            </Field>
+          </FieldGroup>
+        </form>
+      </CardContent>
+    </Card>
+  )
+}

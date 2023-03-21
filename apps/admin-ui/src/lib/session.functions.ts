@@ -1,0 +1,60 @@
+import { publicFn } from './server-fn'
+import { getRequest } from '@tanstack/react-start/server'
+import { isSetupComplete } from '@kestrel/auth/setup'
+import { auth, enabledSocialProviders, isSuperAdmin, setActiveShop } from '@kestrel/auth'
+import { isOpenSignup, listSwitchableShops, resolveAdminShop } from '@kestrel/tenancy'
+
+export const getSocialProviders = publicFn({ method: 'GET' }).handler(() => enabledSocialProviders)
+
+// Public demo only (DEMO_MODE=true): the shared login that /admin/login?demo prefills. These credentials are
+// meant to be public, which is why nothing else ever returns them.
+export const getDemoLogin = publicFn({ method: 'GET' }).handler(() => {
+  const { DEMO_MODE, DEMO_EMAIL, DEMO_PASSWORD } = process.env
+  return DEMO_MODE === 'true' && DEMO_EMAIL && DEMO_PASSWORD ? { email: DEMO_EMAIL, password: DEMO_PASSWORD } : null
+})
+
+// Hosted deployments only: POSTHOG_KEY is set on demo.kestrel.dev / the demo and nowhere else, so a self-hosted or cloned
+// install gets null and loads no analytics. Session replay is on only for the public demo (DEMO_MODE=true), whose
+// data is fake; it is never on for a real shop. See lib/analytics.ts.
+export const getAnalyticsConfig = publicFn({ method: 'GET' }).handler(() => {
+  const { POSTHOG_KEY, POSTHOG_HOST, DEMO_MODE } = process.env
+  return POSTHOG_KEY
+    ? { key: POSTHOG_KEY, host: POSTHOG_HOST || 'https://eu.i.posthog.com', replay: DEMO_MODE === 'true' }
+    : null
+})
+
+export const getAdminContext = publicFn({ method: 'GET' }).handler(async () => {
+  const setupComplete = await isSetupComplete()
+  const openSignup = isOpenSignup
+  if (!setupComplete) return { setupComplete, openSignup, session: null, tenant: null }
+  const session = await auth.api.getSession({ headers: getRequest().headers })
+  if (!session) return { setupComplete, openSignup, session: null, tenant: null }
+  const tenant = await resolveAdminShop({
+    userId: session.user.id,
+    activeShopId: session.session.activeOrganizationId,
+    superAdmin: isSuperAdmin(session.user),
+  })
+  return { setupComplete, openSignup, session, tenant }
+})
+
+export const getSetupStatus = publicFn({ method: 'GET' }).handler(async () => isSetupComplete())
+
+// Shops the sidebar's switcher offers (empty in single mode, or without a session)
+export const getSwitchableShops = publicFn({ method: 'GET' }).handler(async () => {
+  const session = await auth.api.getSession({ headers: getRequest().headers })
+  return session ? listSwitchableShops(session.user.id, isSuperAdmin(session.user)) : []
+})
+
+export const switchShop = publicFn({ method: 'POST' })
+  .validator((shopId: string) => shopId)
+  .handler(async ({ data: shopId }) => {
+    const session = await auth.api.getSession({ headers: getRequest().headers })
+    if (!session) return { ok: false }
+    const ok = await setActiveShop({
+      sessionId: session.session.id,
+      userId: session.user.id,
+      superAdmin: isSuperAdmin(session.user),
+      shopId,
+    })
+    return { ok }
+  })
