@@ -1,0 +1,19 @@
+import { createFileRoute } from '@tanstack/react-router'
+import { PageHeader } from '@/components/admin/page-header'
+import { BusinessDetailsCard } from '@/screens/settings/business-details-card'
+import { CookieBannerCard } from '@/screens/settings/cookie-banner-card'
+import { ShipToCountriesCard } from '@/screens/settings/ship-to-countries-card'
+import { ShopSettingsCard } from '@/screens/settings/shop-settings-card'
+
+export const Route = createFileRoute('/admin/settings/general')({ component: GeneralSettingsPage })
+function GeneralSettingsPage() {
+  return (
+    <>
+      <PageHeader title="General" />
+      <ShopSettingsCard />
+      <ShipToCountriesCard />
+      <BusinessDetailsCard />
+      <CookieBannerCard />
+    </>
+  )
+}

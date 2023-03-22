@@ -1,0 +1,289 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* Kestrel type: Fraunces for display, Inter for the interface. Both are self-hosted latin subsets. */
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 500 600;
+  font-display: swap;
+  src: url('/fonts/fraunces-latin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/inter-latin.woff2') format('woff2');
+}
+
+@theme inline {
+  --font-display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+  --font-heading: var(--font-display);
+  --font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --shadow-card: var(--elevation-card);
+  --shadow-field: var(--elevation-field);
+  --shadow-button: var(--elevation-button);
+  --shadow-button-primary: var(--elevation-button-primary);
+  --shadow-flyout: var(--elevation-flyout);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  /* Paper and ink, with a rust accent and a moss secondary. Warm by design; no stock zinc. */
+  --background: #f7f3ea;
+  --foreground: #101613;
+  --card: #fffcf5;
+  --card-foreground: #101613;
+  --popover: #fffcf5;
+  --popover-foreground: #101613;
+  --primary: #101613;
+  --primary-foreground: #f7f3ea;
+  --secondary: #efe8db;
+  --secondary-foreground: #222c27;
+  --muted: #efe8db;
+  --muted-foreground: #5f6b63;
+  --accent: #efe8db;
+  --accent-foreground: #101613;
+  --destructive: #b3261e;
+  --border: #d9d2c2;
+  --input: #cdc5b3;
+  --ring: #c24e2a;
+  --brand: #c24e2a;
+  --brand-foreground: #fff7ef;
+  --chart-1: #c24e2a;
+  --chart-2: #5f7355;
+  --chart-3: #c99a3f;
+  --chart-4: #45544c;
+  --chart-5: #7c8b82;
+  --radius: 0.25rem;
+  --sidebar: #101613;
+  --sidebar-foreground: #efe8db;
+  --sidebar-primary: #c24e2a;
+  --sidebar-primary-foreground: #f7f3ea;
+  --sidebar-accent: #222c27;
+  --sidebar-accent-foreground: #f7f3ea;
+  --sidebar-border: rgb(247 243 234 / 0.14);
+  --sidebar-ring: #c24e2a;
+
+  /* Hairline rings stay ink-tinted so cards read as cut paper, not as floating glass */
+  --elevation-card: 0 0 0 1px rgb(16 22 19 / 0.09), 0 1px 2px -1px rgb(16 22 19 / 0.06);
+  --elevation-field: 0 0 0 1px rgb(16 22 19 / 0.16);
+  --elevation-button:
+    0 0 0 1px rgb(16 22 19 / 0.14), 0 1px 2px 0 rgb(16 22 19 / 0.08), inset 0 -1px 0 rgb(16 22 19 / 0.05);
+  --elevation-button-primary:
+    0 0 0 1px #101613, 0 1px 2px 0 rgb(16 22 19 / 0.3), inset 0 1px 0 rgb(255 255 255 / 0.13);
+  --elevation-flyout:
+    0 0 0 1px rgb(16 22 19 / 0.1), 0 6px 12px -2px rgb(16 22 19 / 0.1), 0 16px 32px -8px rgb(16 22 19 / 0.14);
+}
+
+.dark {
+  --background: #101613;
+  --foreground: #f2ecdf;
+  --card: #161d19;
+  --card-foreground: #f2ecdf;
+  --popover: #1a221d;
+  --popover-foreground: #f2ecdf;
+  --primary: #f2ecdf;
+  --primary-foreground: #101613;
+  --secondary: #222c27;
+  --secondary-foreground: #f2ecdf;
+  --muted: #222c27;
+  --muted-foreground: #a9b3aa;
+  --accent: #222c27;
+  --accent-foreground: #f2ecdf;
+  --destructive: #e2685f;
+  --border: rgb(242 236 223 / 0.14);
+  --input: rgb(242 236 223 / 0.2);
+  --ring: #d9694a;
+  --brand: #d9694a;
+  --brand-foreground: #1a0e08;
+  --chart-1: #d9694a;
+  --chart-2: #8aa07d;
+  --chart-3: #d9ad5c;
+  --chart-4: #9fb3a6;
+  --chart-5: #7c8b82;
+  --sidebar: #0b100d;
+  --sidebar-foreground: #efe8db;
+  --sidebar-primary: #d9694a;
+  --sidebar-primary-foreground: #101613;
+  --sidebar-accent: #1b231e;
+  --sidebar-accent-foreground: #f7f3ea;
+  --sidebar-border: rgb(242 236 223 / 0.12);
+  --sidebar-ring: #d9694a;
+
+  --elevation-card: 0 0 0 1px rgb(242 236 223 / 0.09), 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --elevation-field: 0 0 0 1px rgb(242 236 223 / 0.16);
+  --elevation-button:
+    0 0 0 1px rgb(242 236 223 / 0.14), 0 1px 2px 0 rgb(0 0 0 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.05);
+  --elevation-button-primary:
+    0 0 0 1px #f2ecdf, 0 1px 2px 0 rgb(0 0 0 / 0.45), inset 0 -1px 0 rgb(0 0 0 / 0.08);
+  --elevation-flyout:
+    0 0 0 1px rgb(242 236 223 / 0.12), 0 6px 12px -2px rgb(0 0 0 / 0.4), 0 16px 32px -8px rgb(0 0 0 / 0.5);
+}
+
+/* The page's actions in the top bar (Import, Export, Create…) are small buttons; the same buttons in a panel keep the
+   default size, and so do those in a dialog the action opens (it is rendered outside the bar) */
+#page-actions :is(button, a) {
+  height: calc(var(--spacing) * 7);
+  gap: calc(var(--spacing) * 1);
+  font-size: 0.8rem;
+}
+#page-actions :is(button, a) svg:not([class*='size-']) {
+  width: calc(var(--spacing) * 3.5);
+  height: calc(var(--spacing) * 3.5);
+}
+
+/* Lists and groups nested in a card: a tinted well with an inner hairline, not a second card */
+@utility surface-inset {
+  border-radius: var(--radius-lg);
+  background: #f1eadc;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+/* A form's trailing actions row (Save / Discard) at the end of a card becomes the card's footer bar */
+[data-slot='card']
+  > [data-slot='card-content']:last-child
+  > form:last-child
+  > [data-slot='field-group']
+  > [data-slot='field'][data-orientation='horizontal']:last-child {
+  width: auto;
+  margin: 0.25rem calc(-1 * var(--card-spacing)) calc(-1 * var(--card-spacing));
+  padding: 0.75rem var(--card-spacing);
+  border-top: 1px solid var(--border);
+  background: #f3eddf;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    --font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    @apply font-sans;
+  }
+  /* Display type is the one loud thing in the admin: page titles, empty states and the sign-in wordmark */
+  h1,
+  h2 {
+    font-family: var(--font-display);
+    letter-spacing: -0.015em;
+    font-weight: 600;
+  }
+  ::selection {
+    background: #c24e2a;
+    color: #fff7ef;
+  }
+  /* The admin is compact by design; on large displays it would look tiny. Everything is sized in rem, so scaling the
+     root size scales the whole UI together: 16px up to 1600px wide (unchanged), ~17.6px at 1870px, ~22px at 2560px. */
+  html {
+    font-size: clamp(16px, 6.4px + 0.6vw, 22px);
+  }
+}
+
+
+/* Kestrel signatures: the diamond motif, editorial micro-labels, square-ish controls and an ink toggle.
+   Kept here so every screen inherits them instead of restyling pages one by one. */
+header {
+  min-height: 3.5rem;
+}
+header h1::before {
+  content: '';
+  display: inline-block;
+  width: 0.42rem;
+  height: 0.42rem;
+  margin-right: 0.55rem;
+  vertical-align: 0.06em;
+  background: var(--brand);
+  transform: rotate(45deg);
+}
+[data-sidebar='group-label'] {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: rgb(239 232 219 / 0.48);
+}
+[data-sidebar='menu-button'] {
+  border-radius: 2px;
+}
+[data-slot='card-title'] {
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  letter-spacing: -0.01em;
+}
+[data-slot='table-head'] th {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+[data-slot='toggle-group-item'][data-state='on'] {
+  background: var(--foreground);
+  color: var(--background);
+}
+[data-slot='button'][data-variant='default'] {
+  letter-spacing: 0.01em;
+}
+
+/* Active nav: a rust rule at the left edge, matching the mark's diamond edge */
+[data-sidebar='menu-button'][data-active='true'],
+[data-sidebar='menu-button'][data-active] {
+  position: relative;
+}
+[data-sidebar='menu-button'][data-active='true']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--brand);
+}
