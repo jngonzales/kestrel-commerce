@@ -1,0 +1,23 @@
+---
+title: Configuration
+description: Environment variables read from the root .env.
+---
+
+`.env` keeps infrastructure only. Shop name, currency, language, shipping, payments and storefront keys are changed in the admin under **Settings**.
+
+<EnvVars />
+
+<Callout>`apps/admin-ui/.env` is a symlink to the root `.env`; Vite loads it for the admin app.</Callout>
+
+## Back up the secret
+
+`KESTREL_SECRET` encrypts the provider keys, SMTP passwords and S3 credentials saved in the admin. Back it up together with the database (or the `/data` volume, where it is generated when you don't set it). A database restored on a new host without the same secret keeps its rows, but those saved keys can't be read and have to be entered again.
+
+## Migrations
+
+```sh
+pnpm db:generate   # generate a migration after changing schema
+pnpm db:migrate    # apply migrations
+```
+
+Migrations are idempotent. The container entrypoint runs them on every start, which also covers upgrades.

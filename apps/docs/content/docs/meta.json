@@ -1,0 +1,13 @@
+{
+  "pages": [
+    "index",
+    "quickstart",
+    "---Run Kestrel---",
+    "self-hosting",
+    "concepts",
+    "---Build---",
+    "storefronts",
+    "api",
+    "apps"
+  ]
+}

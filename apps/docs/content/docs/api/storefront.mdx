@@ -1,0 +1,76 @@
+---
+title: Storefront API
+description: Public, contract-first API for storefronts.
+---
+
+The contract lives in `packages/storefront-sdk/src/contract.ts` (SDK 1.0.0) and is aligned with Shopify's Storefront API 2026-10. See the SDK's `CHANGELOG.md` for the mapping and deliberate differences. Only additive changes will be made.
+
+## Shop resolution
+
+The `x-kestrel-key` header selects that key's shop (an invalid or revoked key returns 401). Without it, the default shop is used (single mode) or the request host (multi mode). Publishable keys are public.
+
+## Catalog
+
+```ts setup=storefront
+const shop = await kestrel.shop.get() // { name, handle, currencyCode, languageCode, languages, seo, cookieBanner, shipToCountries }
+const page = await kestrel.products.list({ first: 20, collection: 'summer', sortKey: 'PRICE' })
+const next = await kestrel.products.list({ first: 20, after: page.pageInfo.endCursor! })
+```
+
+Only `active` products are visible; `draft` and `archived` are admin-only. Prices are `{ amountMinor, currencyCode }`. `customFields` carries the [custom fields](/docs/api/custom-fields) the shop shows on the storefront.
+
+## Languages
+
+`shop.get()` returns `languageCode` (the shop's own language, the text on every product, collection and page) and `languages`, the other languages the merchant publishes (Settings → Languages). To read the store in one of them, set the `language` option of `createStorefrontClient`, or send the `x-kestrel-language` header (a BCP 47 tag such as `fr`). Products, collections and pages then come back with their translated `title`, `description` and `descriptionHtml` (pages: `title`, `body`, `bodySummary`), field by field: a field with no translation keeps the shop's own text. A product's options are translated too (each option's `name` and `optionValues`), and its variants follow: a variant's `selectedOptions` and its `title` (the option values joined) are made of the translated ones, so picking a variant by matching them still works. A language the shop doesn't publish, or one that isn't a language tag, is ignored and the shop's own language is used.
+
+Translations are written through the Admin API (`/admin/languages`, `/admin/translations`) with the `write_translations` scope. A translated description or page body is HTML, sanitized when it is read.
+
+## Cart and checkout
+
+```ts setup=storefront
+const cart = await kestrel.cart.create({ lines: [{ merchandiseId, quantity: 1 }] })
+await kestrel.cart.discountCodesUpdate({ cartId: cart.id, discountCodes: ['SUMMER20'] })
+
+const options = await kestrel.checkout.options({ cartId: cart.id, countryCode: 'US' })
+await kestrel.checkout.complete({
+  cartId: cart.id,
+  email,
+  shippingAddress,
+  shippingRateId,
+  paymentMethodId,
+}) // → { orderNumber }
+```
+
+- Prices stay live until the order is placed.
+- `checkout.options` lists shipping rates and payment methods, and returns `cost` (subtotal, shipping, discount, `totalTaxAmount`, `taxesIncluded`, total) for the chosen rate and address.
+- Discounts: one code for now. Unknown codes come back with `applicable: false`; `checkout.complete` refuses them with `DISCOUNT_NOT_APPLICABLE`.
+- Orders follow Shopify's model: `financialStatus`, `fulfillmentStatus`, `cancelledAt`, shipping lines, transactions, fulfillments.
+- Or redirect to `cart.checkoutUrl` for the hosted checkout.
+
+## Customer accounts
+
+Shoppers sign in with a one-time code emailed through the shop's SMTP settings (Settings → Email), so the shop must send email. There are no passwords. The first sign-in creates the account, and guest orders placed with the same email appear in it.
+
+```ts setup=storefront
+import { createStorefrontClient } from '@kestrel/storefront-sdk'
+
+await kestrel.customer.requestCode({ email }) // emails a one-time code
+const { token, customer } = await kestrel.customer.signIn({ email, code })
+
+// Keep the token server side (the bundled storefront uses an httpOnly cookie) and send it back
+const me = createStorefrontClient({ baseUrl, publishableKey, customerToken: token })
+const orders = await me.customer.orders({ first: 10 })
+const order = await me.customer.order({ id: orders.nodes[0].id })
+await me.customer.signOut()
+```
+
+- Without the SDK, send the token in the `x-kestrel-customer-token` header.
+- A customer only ever sees their own orders (someone else's order id is `NOT_FOUND`). A token only ever resolves to the customer record of the shop it is used in, and reaches nothing in the admin API.
+- A code has <Value name="loginCodeLength" /> digits and is valid for <Value name="loginCodeMinutes" /> minutes. Each code allows <Value name="loginCodeAttempts" /> attempts and works once. On top of that, every 15 minutes: `requestCode` is limited to 4 per email address, 20 per visitor and 200 per shop, and `signIn` to 10 attempts per email address and 30 per visitor, right or wrong. Past a limit both answer `TOO_MANY_REQUESTS` (HTTP 429). The counters are kept in the database, so they hold across restarts and several server replicas. The visitor is told apart by the address in `CLIENT_IP_HEADER` (see the sign-up limits); without one only the per-address and per-shop limits apply.
+- An address that belongs to a staff account gets no code: staff sign in to the admin. Use another address to try the storefront login.
+- The email is the "Customer sign-in code" notification (Settings → Notifications). Without email set up, `requestCode` fails with `CUSTOMER_LOGIN_UNAVAILABLE`.
+- The bundled storefront has the pages: `/account/login`, `/account` (orders, details) and `/account/orders/{id}`, shown in the live theme's layout. Themes link to them with `{{ routes.account_url }}`.
+
+## Errors
+
+Typed in the contract, e.g. `OUT_OF_STOCK { merchandiseId, available }`, `MERCHANDISE_NOT_FOUND`, `LINE_NOT_FOUND`, `CART_COMPLETED`, and for customer accounts `UNAUTHORIZED`, `INVALID_CODE`, `TOO_MANY_REQUESTS` and `CUSTOMER_LOGIN_UNAVAILABLE`.

@@ -1,0 +1,15 @@
+{
+  "title": "Apps",
+  "pages": [
+    "index",
+    "sdk",
+    "ai",
+    "carrier-services",
+    "storefront-scripts",
+    "authentication",
+    "marketplace",
+    "stripe",
+    "cj-dropshipping",
+    "reviews"
+  ]
+}

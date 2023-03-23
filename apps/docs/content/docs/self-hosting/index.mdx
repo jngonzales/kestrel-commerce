@@ -1,0 +1,107 @@
+---
+title: Self-hosting
+description: Deploy Kestrel in one click or on your own server.
+---
+
+import { SITE_URL } from '@/lib/site'
+import { CodeBlock, Pre } from 'fumadocs-ui/components/codeblock'
+
+import { ShieldAlert } from 'lucide-react'
+import { siRender, siDigitalocean, siRailway, siDocker, siLinux } from 'simple-icons'
+import { BrandIcon } from '@/components/brand-icon'
+import { DokployIcon } from '@/components/dokploy-icon'
+
+Kestrel ships as one image containing the admin, API, hosted checkout and the default storefront, fronted by Caddy on a single port. Two ways are fully supported: one-click deploys on Render and DigitalOcean, and the install script on your own server.
+
+## One-click deploy
+
+No server to manage. Each of these creates the app and a Postgres database for you.
+
+<Cards>
+  <Card
+    icon={<BrandIcon icon={siRender} brand={false} />}
+    title="Render"
+    href="https://render.com/deploy?repo=https://github.com/kestrel-labs/kestrel/tree/main"
+  >
+    App plus managed Postgres, HTTPS included.
+  </Card>
+  <Card
+    icon={<BrandIcon icon={siDigitalocean} />}
+    title="DigitalOcean"
+    href="https://cloud.digitalocean.com/apps/new?repo=https://github.com/kestrel-labs/kestrel/tree/main"
+  >
+    App Platform with a managed database.
+  </Card>
+</Cards>
+
+<Callout type="warn" icon={<ShieldAlert />}>
+  Open the deployed URL and complete `/admin/setup` immediately: a fresh install can be claimed by whoever gets there
+  first.
+</Callout>
+
+## Dokploy, Coolify or Portainer
+
+Already run one of these on a server? Deploy Kestrel from one Docker Compose file: the prebuilt image plus Postgres. They handle HTTPS, updates and rollbacks from a web UI.
+
+<Cards>
+  <Card icon={<DokployIcon />} title="Deploy with Docker Compose" href="/docs/self-hosting/dokploy">
+    Full Dokploy guide, plus notes for Coolify and Portainer.
+  </Card>
+</Cards>
+
+## Your own server
+
+The cheapest way to run Kestrel long term, if you are comfortable with a terminal. You need a fresh Linux server with at least 2 GB of memory and a domain. Point two DNS records at the server first: `shop.example.com` for the shop and `stripe.shop.example.com` for the Stripe app. The installer sets up Docker, Postgres and Kestrel, and gets HTTPS certificates automatically.
+
+<CodeBlock title="Terminal">
+  <Pre className="px-4">
+    <code>{`curl -fsSL ${SITE_URL}/install.sh | sudo KESTREL_DOMAIN=shop.example.com sh`}</code>
+  </Pre>
+</CodeBlock>
+
+Then open your domain and finish the setup wizard.
+
+<Callout type="warn" icon={<ShieldAlert />}>
+  Without `KESTREL_DOMAIN` the shop runs over plain HTTP on the server's IP address. That is fine for a quick test, but
+  do not create your admin account or take orders that way.
+</Callout>
+
+<Cards>
+  <Card icon={<BrandIcon icon={siLinux} />} title="Install script guide" href="/docs/self-hosting/install">
+    What the installer does, requirements, and how to update.
+  </Card>
+</Cards>
+
+## Other ways to run it
+
+Works with the same image, but you set more of it up yourself.
+
+<Cards>
+  <Card icon={<BrandIcon icon={siDocker} />} title="Plain Docker" href="/docs/self-hosting/docker">
+    Run the image yourself against your own Postgres.
+  </Card>
+  <Card icon={<BrandIcon icon={siRailway} brand={false} />} title="Railway" href="/docs/self-hosting/railway">
+    Manual setup for now; the one-click template isn't published yet.
+  </Card>
+</Cards>
+
+## After you deploy
+
+<Cards>
+  <Card title="Configuration" href="/docs/self-hosting/configuration">
+    Environment variables.
+  </Card>
+  <Card title="Google & GitHub sign-in" href="/docs/self-hosting/oauth">
+    Optional OAuth providers.
+  </Card>
+  <Card title="End-to-end tests" href="/docs/self-hosting/testing">
+    Run the e2e suite.
+  </Card>
+</Cards>
+
+## How the image is wired
+
+- **Admin, API and checkout** (`/admin`, `/api/*`, `/checkout/*`, plus admin assets) go to the admin app.
+- **Everything else** (`/`, `/products`, `/collections`, `/pages`, theme assets) goes to the storefront.
+
+Every option above runs this same image, so a platform only needs to forward one port and give the app a Postgres `DATABASE_URL`.

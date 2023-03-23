@@ -1,0 +1,85 @@
+---
+title: '@kestrel/app SDK'
+description: An app in a few routes and no database.
+---
+
+```tsx
+import { Hono } from 'hono'
+import { createKestrelApp } from '@kestrel/app'
+import { Page, Card, Button } from '@kestrel/app/ui'
+
+const kestrel = createKestrelApp() // KESTREL_CLIENT_ID, KESTREL_APP_KEY
+const app = new Hono()
+app.route('/', kestrel.routes) // /kestrel/app.js + app-bridge.js
+
+app.get('/api/stats', async (c) => {
+  const { shop, admin } = await kestrel.authenticate(c)
+  return c.json({ shop: shop.name, orders: await admin.api.get('/orders', { params: { query: { limit: 1 } } }) })
+})
+
+app.get('/', async (c) => {
+  await kestrel.authenticate(c)
+  return c.html(
+    <Page title="My App">
+      <Card>
+        <Button action="/api/refresh" reload>
+          Refresh
+        </Button>
+      </Card>
+    </Page>,
+  )
+})
+```
+
+## API
+
+- `authenticate(c)`: session token (bearer from the app bridge, or `?session_token=` on the embedded load) to `{ shop, userId, admin, data, payments, ai }`. Sets `frame-ancestors`.
+- `forShop(instance, shopId)`: for background work.
+- `verifyPaymentsRequest(c, 'payment' | 'refund')`, `verifyAiRequest(c)`, `verifyRatesRequest(c)` (see [Carrier services](/docs/apps/carrier-services)) and `verifyWebhook(c)`: checked against the instance's published keys.
+- `ai.configure({ 'product.description': url, … })`: the AI capabilities the app provides for the shop (see [AI](/docs/apps/ai)).
+- `shop.shipping.configure(...)`: registers a carrier service that quotes shipping rates at checkout.
+- `shop.storefront.configure({ scripts: [url] })` (scope `write_storefront`): the scripts the online store loads on every page for this shop, each on the app's own origin (see [Storefront scripts](/docs/apps/storefront-scripts)).
+- `shop.admin.api.post('/email/send', { body: { to, subject, text, html } })` (scope `write_email`): emails one customer of the shop from the shop's address, through Settings → Email, so the app needs no email server of its own. The recipient must be a customer of the shop, and an app can send up to 500 a hour per shop. The answer is `{ sent: false }`, with nothing sent, while the shop has email off: keep the message and try again later.
+- `data.get/set/delete` and `data.getSecret/setSecret`: secrets are AES-GCM encrypted with a key derived from the app key, unreadable in Kestrel's database.
+
+## UI components
+
+`@kestrel/app/ui` provides `Page`, `Card`, `Stack`, `Inline`, `Text`, `Badge`, `Banner`, `Stat`, `Button`, `Form`, `TextField`, `Select`, `Checkbox`, `Code`, built on `hono/jsx` with admin styles and light/dark support. `<Form action>` and `<Button action>` call the app's backend with fresh session tokens; there is no client build.
+
+For longer pages there are a few more:
+
+- `Disclosures` and `Disclosure` (`title`, `summary`, `open`): settings that stay as one quiet row each and open on click.
+- `Filterable` and `FilterItem`: a list with tabs (and counts), dropdown filters and a search box that narrow the items without a request. The chosen tab and filters stay in the URL hash, so they survive the reload after `<Button action reload>`. Put it in a `Card`, one per page.
+- `Panel` and `<Button toggles="id">`: a form or detail that opens when the button is pressed.
+- `<Button confirm={{ title: 'Delete this review?', message: "This can't be undone.", label: 'Delete' }}>`: the admin asks first in its own dialog (`bridge.confirm`), and the backend is called only when the person confirms (`confirm="Delete?"` is the short form with just a title). Cancel and Esc do nothing.
+
+```tsx
+import { Card, Filterable, FilterItem } from '@kestrel/app/ui'
+
+const rows = [{ id: '1', status: 'open', rating: 5, body: 'Great mug' }]
+
+export const Reviews = () => (
+  <Card>
+    <Filterable
+      tabs={[
+        { value: 'open', label: 'Open', count: 3, alert: true },
+        { value: 'all', label: 'All', count: 9 },
+      ]}
+      defaultTab="open"
+      filters={[{ name: 'rating', label: 'Any rating', options: [{ value: '5', label: '5 stars' }] }]}
+      search="Search"
+      noun="review"
+    >
+      {rows.map((row) => (
+        <FilterItem tab={row.status} values={{ rating: row.rating }} text={row.body}>
+          …
+        </FilterItem>
+      ))}
+    </Filterable>
+  </Card>
+)
+```
+
+## App bridge
+
+Frontends that need more use `@kestrel/app-bridge`: `getSessionToken()`, `authenticatedFetch()` (fresh token per request, no third-party cookies), `toast()`, `confirm()` (a dialog drawn by the admin; resolves to whether the person confirmed) and `redirect()` (top-level, only to the admin or the app's own origin).

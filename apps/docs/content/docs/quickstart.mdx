@@ -1,0 +1,45 @@
+---
+title: Quickstart
+description: Run Kestrel on your machine in one command.
+---
+
+You need [Node.js](https://nodejs.org) 22.22 or newer. Nothing else: no Docker, no database to install.
+
+## 1. Create your shop
+
+<div className="not-prose my-4">
+  <CopyCommand command="npx create-kestrel@latest my-shop" />
+</div>
+
+This downloads Kestrel, sets up an embedded database, and starts the admin and the storefront.
+
+## 2. Open it
+
+| What       | Where                                          |
+| ---------- | ---------------------------------------------- |
+| Admin      | [http://localhost:3000](http://localhost:3000) |
+| Storefront | [http://localhost:4321](http://localhost:4321) |
+
+The admin opens a setup wizard. Create the owner account with an email and password. You can name the shop and set its currency later in **Settings**.
+
+## 3. Start selling
+
+1. Add a product under **Products**.
+2. Set up shipping and payments under **Settings**.
+3. Pick a theme under **Online store → Themes**.
+4. Invite staff from **Staff**.
+
+## Good to know
+
+- **Add apps:** `npx create-kestrel@latest my-shop --with stripe,cj,shippo,reviews`.
+- **Change ports:** `--port` for the admin, `--storefront-port` for the storefront.
+- **Where things are saved:** everything is in the `my-shop` folder (`.env` and the database in `data/`). Delete the folder to start over.
+- **It's a trial setup.** For a real shop, use PostgreSQL and follow the [self-hosting guide](/docs/self-hosting).
+
+<Callout type="warn" title="Finish setup right away">
+  Anyone who reaches a fresh install can claim it. Complete the setup wizard before sharing the URL.
+</Callout>
+
+## Working on Kestrel itself?
+
+Cloning the repo and running `pnpm dev` is covered in [`docs/development.md`](https://github.com/kestrel-labs/kestrel/blob/main/docs/development.md).

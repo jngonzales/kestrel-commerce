@@ -1,0 +1,174 @@
+---
+title: Dokploy
+description: Deploy Kestrel on your own server with Dokploy, from install to your first order.
+---
+
+import { Step, Steps } from 'fumadocs-ui/components/steps'
+
+## One-click template
+
+The fastest way on Dokploy. The Kestrel template creates Postgres, Kestrel and the Stripe app, generates both domains and the secrets, and wires everything together.
+
+<Steps>
+  <Step>In your project, click **Create Service** and choose **Template**.</Step>
+  <Step>Search for **Kestrel** and click **Create**.</Step>
+  <Step>Click **Deploy**, then open the shop's domain at `/admin/setup` and finish the wizard.</Step>
+</Steps>
+
+To use your own domain, replace the generated ones under **Domains** (shop on service `kestrel`, port `3000`; Stripe on service `stripe`, port `4600`) and update `APP_URL` and `STRIPE_APP_URL` under **Environment** to match.
+
+<Callout title="Template pending">
+  The Kestrel template is not in Dokploy's catalog yet. Until it is, follow the manual steps below; they produce the
+  same setup.
+</Callout>
+
+Platforms that run Docker Compose on your own server can deploy Kestrel and its Stripe app from versioned prebuilt images plus a Postgres database. Nothing is built on the server. The production Compose file is [`deploy/docker-compose.yml`](https://github.com/kestrel-labs/kestrel/blob/main/deploy/docker-compose.yml); pin `KESTREL_VERSION` to a release tag for production.
+
+## The compose file
+
+Use [`deploy/docker-compose.yml`](https://github.com/kestrel-labs/kestrel/blob/main/deploy/docker-compose.yml) as is. It is the same file the installer and the in-app updater use. Download it with:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/kestrel-labs/kestrel/main/deploy/docker-compose.yml
+```
+
+Every variable has a local default, so `docker compose up` works without any setup (add `-d` to run it in the background). For a public deployment set these on the platform:
+
+| Variable          | Description                                                                                           |
+| ----------------- | ----------------------------------------------------------------------------------------------------- |
+| `APP_URL`         | Public origin, e.g. `https://shop.example.com`. Default `http://localhost:3000`.                      |
+| `STRIPE_APP_URL`  | Public origin for the Stripe app, e.g. `https://stripe.example.com`. Default `http://localhost:4600`. |
+| `KESTREL_VERSION` | Release tag for both images, e.g. `v1.2.3`. Default `latest`; pin a tag in production.                |
+
+**Optional apps.** The CJ Dropshipping app is off by default. Enable it with `COMPOSE_PROFILES=cj` (or `docker compose --profile cj up`); Kestrel finds it on the Compose network. For a public domain set `CJ_DROPSHIPPING_APP_URL` (e.g. `https://cj.example.com`) and route that domain to port `4700` of the `cj-dropshipping` service. The same applies to `STRIPE_APP_URL` and the `stripe` service.
+
+`KESTREL_SECRET` is optional: when empty, the image generates one into the `kestrel_data` volume, so keep that volume. See [Configuration](/docs/self-hosting/configuration) for the other variables.
+
+## Deploy on Dokploy
+
+[Dokploy](https://dokploy.com) is a self-hosted dashboard that deploys Docker Compose apps, gets HTTPS certificates and handles redeploys. This is the full path from an empty server to a working shop.
+
+### Before you start
+
+- A Linux server with at least 2 GB of memory and Docker-friendly ports **80**, **443** and **3000** free. Dokploy's own dashboard uses port 3000, which is why Kestrel uses a separate Compose file without published ports.
+- A domain you control. You need two DNS records, both pointing at the server's IP address:
+  - `shop.example.com` for the shop and admin.
+  - `stripe.shop.example.com` for the bundled Stripe app. Skip it if you will not take card payments.
+
+### Install Dokploy
+
+On the server, run Dokploy's installer, then open `http://<server-ip>:3000` and create the admin account. Follow [Dokploy's installation guide](https://docs.dokploy.com/docs/core/installation) for the current command and requirements.
+
+### Create the Kestrel service
+
+<Steps>
+  <Step>
+    ### Create a project
+
+    In Dokploy, create a **Project** (for example `shop`), then add a **Compose** service to it.
+
+  </Step>
+  <Step>
+    ### Paste the compose file
+
+    Choose the **Raw** provider and paste the contents of [`deploy/docker-compose.dokploy.yml`](https://github.com/kestrel-labs/kestrel/blob/main/deploy/docker-compose.dokploy.yml). It is the same stack as the main Compose file, without published host ports. It contains Postgres, Kestrel and the Stripe app; the optional CJ Dropshipping app stays off.
+
+  </Step>
+  <Step>
+    ### Set the environment
+
+    Open the **Environment** tab and add:
+
+    ```sh
+    APP_URL=https://shop.example.com
+    STRIPE_APP_URL=https://stripe.shop.example.com
+    KESTREL_VERSION=v1.2.3
+    DEFAULT_SHOP_NAME=My Shop
+    ```
+
+    Use a real release tag from the [releases page](https://github.com/kestrel-labs/kestrel/releases) for `KESTREL_VERSION`. `latest` works, but a pinned tag means a redeploy never changes the version by surprise.
+
+  </Step>
+  <Step>
+    ### Add the domains
+
+    Open the **Domains** tab and add two entries, each with HTTPS enabled and a Let's Encrypt certificate:
+
+    | Host                      | Service   | Port   |
+    | ------------------------- | --------- | ------ |
+    | `shop.example.com`        | `kestrel` | `3000` |
+    | `stripe.shop.example.com` | `stripe`  | `4600` |
+
+    The DNS records must already point at the server, or the certificate request fails.
+
+  </Step>
+  <Step>
+    ### Deploy
+
+    Click **Deploy** and watch the logs. The first deploy pulls the images and runs the database migrations, so it takes a minute or two. When the `kestrel` container is healthy, open `https://shop.example.com/admin/setup`.
+
+  </Step>
+</Steps>
+
+<Callout type="warn">
+  Complete `/admin/setup` immediately: a fresh install can be claimed by whoever gets there first.
+</Callout>
+
+### After the first deploy
+
+1. Finish the setup wizard and create your admin account.
+2. Add your products, then set up payments from **Settings** in the admin.
+3. Check that the storefront loads at `https://shop.example.com`.
+
+### Update
+
+Change `KESTREL_VERSION` in **Environment** to the new release tag and click **Deploy**. `pull_policy: always` fetches that tagged image, and Kestrel and Stripe use the same tag. Migrations run on start, so upgrades need no extra step.
+
+### Back up
+
+Two volumes hold your data: `db` (Postgres) and `kestrel_data`. The secret that encrypts provider keys, SMTP passwords and storage credentials lives in `kestrel_data`, so back up both together. A database restored without the same secret keeps its rows, but saved keys can't be read and must be entered again. Dokploy can schedule database backups to S3-compatible storage; see its documentation.
+
+### Optional: CJ Dropshipping
+
+Add `COMPOSE_PROFILES=cj` and `CJ_DROPSHIPPING_APP_URL=https://cj.shop.example.com` to the environment, add a DNS record for `cj.shop.example.com`, and add a domain pointing at service `cj-dropshipping` on port `4700`. Redeploy.
+
+### Optional: multi-shop (public demo or SaaS)
+
+To let anyone sign up and get their own shop at `<slug>.example.com`, add three values to **Environment** and redeploy. The compose file already routes the shops' hosts to Kestrel, so there are no labels to write.
+
+| Variable       | Value                                                                              |
+| -------------- | ---------------------------------------------------------------------------------- |
+| `TENANCY_MODE` | `multi`                                                                            |
+| `OPEN_SIGNUP`  | `true` (see [Configuration](/docs/self-hosting/configuration))                     |
+| `ROOT_DOMAIN`  | The bare domain the shops live under, e.g. `example.com` (no `https://`, no path). |
+
+1. Add a wildcard DNS record, `*`, pointing at the server. Behind Cloudflare, proxy it and set SSL/TLS to **Full**; the wildcard route uses Traefik's default certificate, because a Let's Encrypt wildcard needs a DNS challenge. Cloudflare's free certificate covers one wildcard level, so `*.example.com` gets HTTPS but `*.shops.example.com` does not.
+2. Keep the admin on its own domain (added under **Domains**, service `kestrel`, port `3000`), and set `APP_URL` to it. It can sit under `ROOT_DOMAIN` (for example `app.example.com`, a name the platform keeps) or on another domain. The admin host has no storefront. `/admin` on any other host (a shop's address, a mistyped subdomain) redirects to the admin host, taken from `APP_URL`; set `ADMIN_HOST` to name it explicitly.
+3. Set `ROOT_DOMAIN` only together with `TENANCY_MODE=multi`. In single mode it would send every subdomain to the one shop.
+4. Create your own account first: a fresh install lets whoever arrives first claim it.
+
+A shop's name becomes its address (`acme-candles.example.com`), except names the platform keeps (`admin`, `app`, `www`, `api`…). Two multi-shop installs on one Dokploy server would share the route name `kestrel-shops`; rename it in the compose labels if you run both. See [Tenancy](/docs/concepts/tenancy) for how shops are resolved.
+
+### Troubleshooting
+
+- **The first deploy fails with a port error.** You pasted the main `docker-compose.yml`, which publishes ports 3000, 80 and 443. Use `docker-compose.dokploy.yml`.
+- **No certificate, or a browser warning.** The DNS record is missing or has not propagated yet. Check it, then redeploy.
+- **Checkout or Stripe links point at `localhost`.** `APP_URL` or `STRIPE_APP_URL` is unset. Set both and redeploy.
+- **A shop's address answers `404 page not found` (multi-shop).** That text is Traefik's, so no route matched the host. Check that `ROOT_DOMAIN` is set, bare, in **Environment**, and that you redeployed after changing it. A plain "Store not found" page is Kestrel's: the shop does not exist or the slug is reserved.
+- **Multi-shop is set but signup stays invitation-only.** The compose file must pass the variables through; use the current `docker-compose.dokploy.yml`, which reads `TENANCY_MODE`, `OPEN_SIGNUP` and `ROOT_DOMAIN` from **Environment**.
+- **`/admin` loads but sign-in fails.** `APP_URL` does not match the domain you are visiting, including `https://` and no trailing slash.
+
+## Coolify, Portainer and others
+
+Any platform that accepts a compose file works the same way: Coolify (a Docker Compose resource), Portainer (a stack from the web editor), or plain `docker compose up -d`. Route the Kestrel domain to port `3000` and the Stripe domain to port `4600`; let the platform's proxy handle HTTPS. For plain Docker Compose without a proxy, publish both ports on the host.
+
+The container already includes Caddy, which routes the admin and API to the admin app and everything else to the storefront, so the platform only needs to forward one port.
+
+<Callout type="warn">
+  Open the deployed URL and complete `/admin/setup` immediately: a fresh install can be claimed by whoever gets there
+  first.
+</Callout>
+
+## Servers with little memory
+
+Use the prebuilt image rather than building on the server. The build needs far more memory than running the shop does, and can fail on a 2 GB machine.
