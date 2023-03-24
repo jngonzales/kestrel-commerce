@@ -1,0 +1,135 @@
+// Kestrel → app: payment and refund sessions (signed with the instance's key). Kept apart from server.tsx (which starts
+// the server on import) so it can be tested with a fake Stripe and a fake Kestrel.
+import { Hono, type Context } from 'hono'
+import type Stripe from 'stripe'
+import { toStripeAmount } from './amount'
+import type { PaymentSessionRequest, RefundSessionRequest, ShopContext } from '@kestrel/app'
+import { log } from './log'
+
+export type PaymentDeps = {
+  /** Checks the signature of Kestrel's request and finds its shop (kestrel.verifyPaymentsRequest) */
+  verify<K extends 'payment' | 'refund'>(
+    c: Context,
+    kind: K,
+  ): Promise<{ request: K extends 'payment' ? PaymentSessionRequest : RefundSessionRequest; shop: ShopContext }>
+  /** The Stripe client of the shop's saved key */
+  stripeFor(shop: ShopContext): Promise<Stripe>
+}
+
+const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+// Stripe Checkout sessions last 30 minutes to 24 hours
+export const checkoutExpiry = (expiresAt: string) => {
+  const now = Math.floor(Date.now() / 1000)
+  const wanted = Math.floor(new Date(expiresAt).getTime() / 1000)
+  return Math.min(Math.max(wanted, now + 30 * 60 + 60), now + 24 * 3600 - 60)
+}
+
+// Kestrel keeps one open payment attempt per order: a new session replaces the old one. Stripe doesn't know that, and
+// the buyer may still have the old Checkout page open and pay it as well as the new one (charged twice). So the old
+// open Checkout Sessions of the order are ended first. One that is being paid right now can't be expired, and that is
+// fine: it is the buyer's payment in flight, and the order shows it if both go through.
+export async function expireReplaced(stripe: Stripe, request: PaymentSessionRequest) {
+  const dayAgo = Math.floor(Date.now() / 1000) - 24 * 3600
+  try {
+    // Stripe can't filter Checkout Sessions by metadata; open ones are few and all newer than the longest expiry
+    for await (const open of stripe.checkout.sessions.list({ status: 'open', created: { gte: dayAgo }, limit: 100 })) {
+      const { kestrel_order_id: orderId, kestrel_session_id: sessionId } = open.metadata ?? {}
+      if (orderId !== request.orderId || sessionId === request.id) continue
+      await stripe.checkout.sessions.expire(open.id).catch((error: unknown) => {
+        log.error({ err: error, checkoutId: open.id }, 'expire replaced checkout failed')
+      })
+    }
+  } catch (error) {
+    // Starting the new payment matters more than cleaning up the old one
+    log.error({ err: error, orderId: request.orderId }, 'list open checkouts failed')
+  }
+}
+
+export function paymentRoutes(deps: PaymentDeps) {
+  const routes = new Hono()
+
+  routes.post('/payments/session', async (c) => {
+    const { request, shop } = await deps.verify(c, 'payment')
+    try {
+      // In the unit Stripe takes, which is also the unit its webhook reports back
+      const amount = toStripeAmount(request.amount.cents, request.amount.currency)
+      const metadata = {
+        kestrel_session_id: request.id,
+        kestrel_instance: shop.instance,
+        kestrel_shop_id: shop.shopId,
+        kestrel_order_id: request.orderId,
+        // What this session must collect: the webhook checks Stripe's amount against it before marking the order paid
+        kestrel_amount_cents: String(amount),
+        kestrel_currency: request.amount.currency.toLowerCase(),
+      }
+      const stripe = await deps.stripeFor(shop)
+      await expireReplaced(stripe, request)
+      const session = await stripe.checkout.sessions.create(
+        {
+          mode: 'payment',
+          // Tags Kestrel checkouts in the Stripe Dashboard
+          integration_identifier: 'kestrel_checkout_qmvkzrtd',
+          client_reference_id: request.id,
+          customer_email: request.customer.email,
+          line_items: [
+            {
+              quantity: 1,
+              price_data: {
+                currency: request.amount.currency.toLowerCase(),
+                unit_amount: amount,
+                product_data: { name: `Order #${request.orderNumber}` },
+              },
+            },
+          ],
+          success_url: request.returnUrl,
+          cancel_url: request.returnUrl,
+          expires_at: checkoutExpiry(request.expiresAt),
+          metadata,
+          payment_intent_data: { metadata },
+        },
+        // Kestrel retrying the same session gets the same Checkout Session
+        { idempotencyKey: `kestrel-payment-${request.id}` },
+      )
+      return c.json({ redirectUrl: session.url })
+    } catch (error) {
+      log.error({ err: error, sessionId: request.id }, 'payment session failed')
+      return c.json({ error: message(error) }, 502)
+    }
+  })
+
+  // Answers right away; the refund is made and reported to Kestrel in the background
+  routes.post('/payments/refund', async (c) => {
+    const { request, shop } = await deps.verify(c, 'refund')
+    void refund(deps, shop, request)
+    return c.body(null, 202)
+  })
+
+  return routes
+}
+
+export async function refund(deps: PaymentDeps, shop: ShopContext, request: RefundSessionRequest) {
+  try {
+    if (!request.payment.externalId) throw new Error('No Stripe payment to refund')
+    const result = await (
+      await deps.stripeFor(shop)
+    ).refunds.create(
+      {
+        payment_intent: request.payment.externalId,
+        amount: toStripeAmount(request.amount.cents, request.amount.currency),
+        metadata: { kestrel_session_id: request.id, kestrel_order_id: request.orderId },
+      },
+      { idempotencyKey: `kestrel-refund-${request.id}` },
+    )
+    if (result.status === 'failed' || result.status === 'canceled') {
+      await shop.payments.reject(request.id, `Stripe refund ${result.status}`)
+    } else {
+      await shop.payments.resolve(request.id, result.id)
+    }
+  } catch (error) {
+    log.error({ err: error, refundId: request.id }, 'refund failed')
+    await shop.payments
+      .reject(request.id, message(error))
+      .catch((e) => log.error({ err: e, refundId: request.id }, 'reject refund failed'))
+  }
+}
