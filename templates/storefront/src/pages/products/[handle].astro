@@ -1,0 +1,10 @@
+---
+import { orNull, kestrel } from '../../core/kestrel'
+import { loadTheme, render } from '../../core/theme'
+
+const [theme, product] = await Promise.all([
+  loadTheme(Astro.url),
+  orNull(kestrel.products.getByHandle({ handle: Astro.params.handle! })),
+])
+return render(theme, Astro.url, product ? { template: 'product', product } : { template: '404' })
+---
