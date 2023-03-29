@@ -1,0 +1,118 @@
+#!/bin/bash
+# Container entrypoint: migrate, then run the admin app, the storefront and Caddy side by side.
+# If any of them exits the container exits, so the platform restarts it.
+set -e
+
+# Platforms like Render only expose their public URL as RENDER_EXTERNAL_URL.
+export APP_URL="${APP_URL:-$RENDER_EXTERNAL_URL}"
+
+# KESTREL_SECRET encrypts the provider keys saved in the admin, signs preview links and (through a derived key)
+# sessions. When not given it is generated once and kept on the /data volume, so restarts keep sessions and stored
+# keys. Without a volume it is regenerated on every start.
+ensure_secret() {
+  local name="$1" file="$2" path="${DATA_DIR:-/data}/$2"
+  if [ -z "${!name}" ]; then
+    if [ ! -s "$path" ]; then
+      mkdir -p "$(dirname "$path")"
+      (umask 077 && head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$path")
+      echo "$name not set: generated one at $path. Mount a volume on $(dirname "$path") or set $name to keep it across redeploys." >&2
+    fi
+    export "$name=$(cat "$path")"
+  fi
+}
+ensure_secret KESTREL_SECRET kestrel-secret
+# Installs from before the single secret generated a separate session secret: keep using it so nobody is signed out
+legacy="${DATA_DIR:-/data}/better-auth-secret"
+if [ -z "$BETTER_AUTH_SECRET" ] && [ -s "$legacy" ]; then export BETTER_AUTH_SECRET="$(cat "$legacy")"; fi
+: "${DATABASE_URL:?set DATABASE_URL}"
+
+export PUBLIC_PORT="${PORT:-3000}" ADMIN_PORT=3001 STOREFRONT_PORT=4321
+
+# DOMAIN turns on Caddy's automatic HTTPS (ports 80 and 443 must reach this container). Certificates
+# are kept on the /data volume so restarts don't request new ones.
+if [ -n "$DOMAIN" ]; then
+  export SITE_ADDRESS="$DOMAIN" AUTO_HTTPS_OPT="" APPS_CADDYFILE=Caddyfile.apps
+  export XDG_DATA_HOME="${DATA_DIR:-/data}/caddy"
+  export APP_URL="${APP_URL:-https://$DOMAIN}"
+else
+  export SITE_ADDRESS=":$PUBLIC_PORT" AUTO_HTTPS_OPT="auto_https off" APPS_CADDYFILE="no-apps-*.caddy"
+fi
+
+# Multi-tenant shops live at <slug>.ROOT_DOMAIN: serve the wildcard next to the admin host. A wildcard certificate
+# needs the DNS-01 challenge, so its `tls { dns … }` block goes in a file named by SITE_TLS_FILE (Caddy built with
+# your DNS provider's plugin). Behind a CDN that terminates TLS (Cloudflare…), leave it unset.
+if [ -n "$DOMAIN" ] && [ "$TENANCY_MODE" = "multi" ] && [ -n "$ROOT_DOMAIN" ]; then
+  root="${ROOT_DOMAIN#*://}"
+  root="${root%%[:/]*}"
+  export SITE_ADDRESS="$DOMAIN, *.$root"
+fi
+
+# The admin is served on one host only; /admin on any other host (a shop's <slug>.ROOT_DOMAIN, a mistyped subdomain)
+# redirects there. ADMIN_HOST sets it explicitly and works behind a proxy or CDN that terminates TLS (Cloudflare,
+# Traefik) without DOMAIN, which would turn on Caddy's own HTTPS. In multi mode with ROOT_DOMAIN it defaults to
+# DOMAIN, else to the host of APP_URL. Single-shop installs keep /admin on every host unless ADMIN_HOST is set.
+admin_host="$ADMIN_HOST"
+if [ -z "$admin_host" ] && [ "$TENANCY_MODE" = "multi" ] && [ -n "$ROOT_DOMAIN" ]; then
+  admin_host="${DOMAIN:-${APP_URL#*://}}"
+fi
+admin_host="${admin_host#*://}"
+admin_host="${admin_host%%[:/]*}"
+if [ -n "$admin_host" ]; then
+  export ADMIN_HOST="$admin_host" SHOP_HOSTS_CADDYFILE=Caddyfile.shops
+fi
+export SHOP_HOSTS_CADDYFILE="${SHOP_HOSTS_CADDYFILE:-no-shops-*.caddy}"
+export SITE_TLS_FILE="${SITE_TLS_FILE:-no-tls-*.caddy}"
+
+# Caddy serves the bundled storefront on the app's own origin, so a single shop that hasn't saved a
+# Storefront URL in Settings (Themes, editor preview) uses that one.
+export STOREFRONT_URL="${STOREFRONT_URL:-$APP_URL}"
+
+# drizzle-kit swallows the real connection error, so a bad host or password looks like a crashing
+# migration. Connect first and print what pg says (never the URL, it holds the password).
+pnpm --silent --filter @kestrel/db exec node -e '
+const { Client } = require("pg");
+const client = new Client({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 10000 });
+client.connect().then(() => client.end()).catch((err) => {
+  console.error("Cannot connect to the database: " + (err.message || err.code || err));
+  console.error("Check DATABASE_URL (host, port, user, password, sslmode) and that the database is reachable from this container.");
+  process.exit(1);
+});
+'
+
+# Migrations are idempotent, so running them on every start also covers updates.
+pnpm db:migrate
+
+# Once the admin and the storefront answer, print where to open the shop so it doesn't scroll away in the startup
+# logs. `disown` keeps this helper out of `wait -n` below: it exits on purpose, and that must not stop the container.
+announce_ready() {
+  node -e '
+    const urls = [`http://127.0.0.1:${process.env.ADMIN_PORT}/admin/login`, `http://127.0.0.1:${process.env.STOREFRONT_PORT}/`];
+    const up = (url) => fetch(url, { redirect: "manual" }).then((res) => res.status < 500, () => false);
+    (async () => {
+      for (let i = 0; i < 180; i++) {
+        if ((await Promise.all(urls.map(up))).every(Boolean)) process.exit(0);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      process.exit(1);
+    })();
+  ' || return 0
+  local url="${APP_URL:-http://localhost:$PUBLIC_PORT}" b="" c="" d="" g="" r=""
+  url="${url%/}"
+  if [ -z "$NO_COLOR" ]; then b=$'\e[1m' c=$'\e[36m' d=$'\e[2m' g=$'\e[32m' r=$'\e[0m'; fi
+  printf '\n%s\n' "${d}────────────────────────────────────────────────────────────${r}"
+  printf '  %s✔ Kestrel is ready%s\n\n' "${g}${b}" "$r"
+  printf '  %sShop %s  %s%s%s\n' "$b" "$r" "$c" "$url" "$r"
+  printf '  %sAdmin%s  %s%s/admin%s  %s(first run opens the setup wizard)%s\n' "$b" "$r" "$c" "$url" "$r" "$d" "$r"
+  printf '\n  %sCreate the owner account right away: anyone who reaches a fresh install can claim it.%s\n' "$d" "$r"
+  printf '%s\n\n' "${d}────────────────────────────────────────────────────────────${r}"
+}
+announce_ready &
+disown
+
+(cd apps/admin-ui && PORT=$ADMIN_PORT node server.mjs) &
+(cd templates/storefront && HOST=127.0.0.1 PORT=$STOREFRONT_PORT \
+  KESTREL_URL="http://localhost:$ADMIN_PORT" KESTREL_PUBLIC_URL="$APP_URL" node dist/server/entry.mjs) &
+caddy run --config deploy/Caddyfile --adapter caddyfile &
+
+wait -n
+exit 1

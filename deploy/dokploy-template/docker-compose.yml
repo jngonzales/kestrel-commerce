@@ -1,0 +1,59 @@
+# Dokploy template: the Dokploy Compose file minus the optional CJ Dropshipping app.
+# Variables come from template.toml. Keep the rest in sync with ../docker-compose.dokploy.yml.
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kestrel
+      POSTGRES_PASSWORD: kestrel
+      POSTGRES_DB: kestrel
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U kestrel']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  kestrel:
+    image: ghcr.io/kestrel-labs/kestrel:${KESTREL_VERSION:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    volumes:
+      - kestrel_data:/data
+    environment:
+      DATABASE_URL: postgres://kestrel:kestrel@db:5432/kestrel
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      KESTREL_SECRET: ${KESTREL_SECRET:-}
+      # Multi-shop (a public demo or SaaS): TENANCY_MODE=multi, OPEN_SIGNUP=true lets anyone create a shop, ROOT_DOMAIN
+      # serves every shop at <slug>.ROOT_DOMAIN (see docs: Concepts > Tenancy). The defaults keep a single shop.
+      TENANCY_MODE: ${TENANCY_MODE:-single}
+      OPEN_SIGNUP: ${OPEN_SIGNUP:-false}
+      ROOT_DOMAIN: ${ROOT_DOMAIN:-}
+      # The one host that serves /admin (others redirect to it). Defaults to the host of APP_URL in multi mode.
+      ADMIN_HOST: ${ADMIN_HOST:-}
+      # Open sign-up limits (OPEN_SIGNUP=true): per address and for everyone, per hour. Behind Cloudflare set
+      # CLIENT_IP_HEADER=cf-connecting-ip so each visitor is told apart (see docs: Concepts > Tenancy).
+      SIGNUP_RATE_PER_IP: ${SIGNUP_RATE_PER_IP:-}
+      SIGNUP_RATE_GLOBAL: ${SIGNUP_RATE_GLOBAL:-}
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-}
+      DEFAULT_SHOP_NAME: ${DEFAULT_SHOP_NAME:-My Shop}
+      # Look for the bundled apps (stripe, cj-dropshipping) at their service names on this network
+      KESTREL_BUNDLED_APPS: docker
+
+  stripe:
+    image: ghcr.io/kestrel-labs/kestrel-stripe:${KESTREL_VERSION:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      STRIPE_APP_URL: ${STRIPE_APP_URL:-http://localhost:4600}
+      KESTREL_INTERNAL_URL: http://kestrel:3000
+      STRIPE_APP_KEY: '${STRIPE_APP_KEY:?Set STRIPE_APP_KEY in .env, the private key of the Stripe app (see the top of this file)}'
+
+volumes:
+  db:
+  kestrel_data:

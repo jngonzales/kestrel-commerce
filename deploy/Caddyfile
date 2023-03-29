@@ -1,0 +1,34 @@
+# One public port in front of both apps. Admin, API and hosted checkout go to the admin app;
+# everything else (/, /products, /collections, /pages, theme assets…) is the storefront.
+# SITE_ADDRESS and AUTO_HTTPS_OPT come from start.sh: with DOMAIN set Caddy serves that host and gets
+# a certificate on its own; otherwise it listens on plain HTTP on PUBLIC_PORT. In multi mode with ROOT_DOMAIN it
+# also serves *.ROOT_DOMAIN (the shops' storefronts); see SITE_TLS_FILE in start.sh for its certificate.
+{
+	admin off
+	{$AUTO_HTTPS_OPT}
+
+	# Behind a proxy that ends TLS (Traefik on Dokploy, a load balancer), keep the X-Forwarded-Proto/Host it sends.
+	# Without this Caddy overwrites them with its own plain-HTTP view, and the storefront builds http:// API URLs
+	# that the browser blocks as mixed content. Only private addresses are trusted, never the public internet.
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+{$SITE_ADDRESS} {
+	import {$SITE_TLS_FILE}
+
+	# Multi mode: the admin lives on the main host only; a shop's address (<slug>.ROOT_DOMAIN) is its storefront.
+	import {$SHOP_HOSTS_CADDYFILE}
+
+	@admin path /admin /admin/* /_serverFn/* /api/* /checkout/* /assets/* /fonts/* /favicon.svg
+	handle @admin {
+		reverse_proxy localhost:{$ADMIN_PORT}
+	}
+	handle {
+		reverse_proxy localhost:{$STOREFRONT_PORT}
+	}
+}
+
+# Empty unless DOMAIN is set (start.sh points it at Caddyfile.apps).
+import {$APPS_CADDYFILE}

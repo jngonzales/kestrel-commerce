@@ -1,0 +1,24 @@
+[variables]
+main_domain = "${domain}"
+stripe_domain = "${domain}"
+kestrel_secret = "${base64:32}"
+
+[config]
+[[config.domains]]
+serviceName = "kestrel"
+port = 3000
+host = "${main_domain}"
+
+[[config.domains]]
+serviceName = "stripe"
+port = 4600
+host = "${stripe_domain}"
+
+[config.env]
+APP_URL = "https://${main_domain}"
+STRIPE_APP_URL = "https://${stripe_domain}"
+KESTREL_VERSION = "latest"
+KESTREL_SECRET = "${kestrel_secret}"
+# The Stripe app's private key (snxk_…). Dokploy cannot make one: see the top of docker-compose.yml for the command, then
+# fill it in before the first deploy. Keep it: a new key makes it a new app, so merchants reconnect.
+STRIPE_APP_KEY = ""

@@ -1,0 +1,9 @@
+# Loaded when the admin has its own host (start.sh sets SHOP_HOSTS_CADDYFILE and ADMIN_HOST: ADMIN_HOST, or in multi
+# mode DOMAIN / the host of APP_URL). The admin is served there; on any other host (a shop's <slug>.ROOT_DOMAIN, a
+# mistyped subdomain) /admin goes there instead, so those never show an admin page. The checkout and the API stay on
+# every host: the storefront needs them.
+@shopAdmin {
+	path /admin /admin/*
+	not host {$ADMIN_HOST}
+}
+redir @shopAdmin https://{$ADMIN_HOST}{uri} 308
