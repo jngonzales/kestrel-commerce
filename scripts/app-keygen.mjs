@@ -1,0 +1,7 @@
+// Prints a new app key pair (Ed25519), in the format @kestrel/marketplace-sdk/keys uses:
+//   private key  snxk_ + base64url(PKCS#8)  → the app's KESTREL_APP_KEY
+//   public key   base64url(raw)             → what Kestrel / the marketplace store
+const pair = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])
+const b64url = (buffer) => Buffer.from(buffer).toString('base64url')
+console.log(`private key: snxk_${b64url(await crypto.subtle.exportKey('pkcs8', pair.privateKey))}`)
+console.log(`public key:  ${b64url(await crypto.subtle.exportKey('raw', pair.publicKey))}`)

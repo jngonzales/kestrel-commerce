@@ -1,0 +1,43 @@
+{
+  "name": "@kestrel/e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsx --env-file-if-exists=../.env --test --test-concurrency=1 'tests/**/*.test.ts'",
+    "typecheck": "tsc",
+    "test:ci": "tsx --env-file-if-exists=../.env --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=api-results.xml 'tests/**/*.test.ts'",
+    "test:browser": "node --env-file-if-exists=../.env node_modules/@playwright/test/cli.js test"
+  },
+  "dependencies": {
+    "@kestrel/ai": "workspace:*",
+    "@kestrel/api": "workspace:*",
+    "@kestrel/app": "workspace:*",
+    "@kestrel/apps": "workspace:*",
+    "@kestrel/auth": "workspace:*",
+    "@kestrel/cart": "workspace:*",
+    "@kestrel/catalog": "workspace:*",
+    "@kestrel/channels": "workspace:*",
+    "@kestrel/content": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/custom-fields": "workspace:*",
+    "@kestrel/customers": "workspace:*",
+    "@kestrel/db": "workspace:*",
+    "@kestrel/email": "workspace:*",
+    "@kestrel/marketplace-sdk": "workspace:*",
+    "@kestrel/orders": "workspace:*",
+    "@kestrel/payments": "workspace:*",
+    "@kestrel/gift-cards": "workspace:*",
+    "@kestrel/languages": "workspace:*",
+    "@kestrel/pricing": "workspace:*",
+    "@kestrel/privacy": "workspace:*",
+    "@kestrel/tenancy": "workspace:*",
+    "@kestrel/webhooks": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0",
+    "@types/node": "catalog:",
+    "tsx": "^4.23.15"
+  }
+}
