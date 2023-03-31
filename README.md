@@ -20,12 +20,9 @@
   <img src="docs/images/storefront.webp" alt="Kestrel storefront" width="900">
 </p>
 
-## Demo
+## Preview
 
-<video src="docs/assets/demo.mp4" poster="docs/assets/demo.jpg" controls muted playsinline preload="metadata" width="900"></video>
-
-If the player does not load, open [docs/assets/demo.mp4](docs/assets/demo.mp4).
-
+https://github.com/user-attachments/assets/3b3fefb0-d05c-4a4f-b212-15e7b576b8fb
 ## What it is
 
 Kestrel is a commerce platform you run yourself. One Node process serves the admin, the checkout, the Storefront API and the webhook endpoints; storefronts are separate and can be anything that speaks the API, including the bundled Liquid theme renderer.
